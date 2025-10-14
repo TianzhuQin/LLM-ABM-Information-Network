@@ -12,7 +12,7 @@ n: 5
 edge_mean_degree: 2
 
 # Number of rounds to simulate
-rounds: 3
+rounds: 100
 
 # Geometric conversation depth parameter p (expected ~1/p)
 convo_depth_p: 0.6
@@ -30,10 +30,10 @@ seed_nodes: [0, 1]
 seed_belief: 0.98
 
 # Misinformation text (claim discussed when sampled)
-misinfo_text: "5G towers cause illness."
+misinfo_text: "Dogs are better than cat."
 
 # Probability a sampled edge talks about the misinformation this round
-talk_misinfo_prob: 0.25
+talk_misinfo_prob: 0.75
 
 # Contagion mode: 'llm' | 'simple' | 'complex'
 contagion_mode: llm
@@ -59,31 +59,31 @@ api_key_file: api-key.txt
 #     * weighted choices: {choices: {Woman: 0.6, Man: 0.4}}
 #     * normal age: {dist: normal, mean: 40, std: 12, min: 18, max: 80}
 #     * uniform age: {uniform: [min, max]}
-persona_segments:
-  - proportion: 0.4
-    traits:
-      gender: {choices: {Woman: 0.55, Man: 0.43, Nonbinary: 0.02}}
-      race: {choices: {White: 0.5, Hispanic: 0.25, Black: 0.15, Asian: 0.08, Other: 0.02}}
-      age: {dist: normal, mean: 42, std: 12, min: 18, max: 80}
-      religion: {choices: {Protestant: 0.4, Catholic: 0.3, Unreligious: 0.3}}
-      political: {choices: {Democrat: 0.6, Republican: 0.4}}
-      region: Coastal
-  - proportion: 0.3
-    traits:
-      gender: Man
-      race: White
-      age: {uniform: [30, 60]}
-      religion: {choices: {Protestant: 0.6, Unreligious: 0.4}}
-      political: {choices: {Republican: 0.65, Democrat: 0.35}}
-      profession: {choices: {Construction: 0.5, Manufacturing: 0.5}}
-  - proportion: 0.3
-    traits:
-      gender: {choices: {Woman: 0.5, Man: 0.5}}
-      race: {choices: {Asian: 0.5, Hispanic: 0.5}}
-      age: {dist: normal, mean: 28, std: 6, min: 18, max: 45}
-      religion: Unreligious
-      political: {choices: {Democrat: 0.7, Republican: 0.3}}
-      education: {choices: {College: 0.7, HighSchool: 0.3}}
+# persona_segments:
+#   - proportion: 0.4
+#     traits:
+#       gender: {choices: {Woman: 0.55, Man: 0.43, Nonbinary: 0.02}}
+#       race: {choices: {White: 0.5, Hispanic: 0.25, Black: 0.15, Asian: 0.08, Other: 0.02}}
+#       age: {dist: normal, mean: 42, std: 12, min: 18, max: 80}
+#       religion: {choices: {Protestant: 0.4, Catholic: 0.3, Unreligious: 0.3}}
+#       political: {choices: {Democrat: 0.6, Republican: 0.4}}
+#       region: Coastal
+#   - proportion: 0.3
+#     traits:
+#       gender: Man
+#       race: White
+#       age: {uniform: [30, 60]}
+#       religion: {choices: {Protestant: 0.6, Unreligious: 0.4}}
+#       political: {choices: {Republican: 0.65, Democrat: 0.35}}
+#       profession: {choices: {Construction: 0.5, Manufacturing: 0.5}}
+#   - proportion: 0.3
+#     traits:
+#       gender: {choices: {Woman: 0.5, Man: 0.5}}
+#       race: {choices: {Asian: 0.5, Hispanic: 0.5}}
+#       age: {dist: normal, mean: 28, std: 6, min: 18, max: 45}
+#       religion: Unreligious
+#       political: {choices: {Democrat: 0.7, Republican: 0.3}}
+#       education: {choices: {College: 0.7, HighSchool: 0.3}}
 
 # Printing controls
 # - print_conversations: print conversations
