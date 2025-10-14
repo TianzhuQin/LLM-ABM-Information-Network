@@ -50,10 +50,10 @@ def llm_belief_updates(model: str, misinfo_text: str, prior_i: float, prior_j: f
         return float(np.clip(prior_i, 0.0, 1.0)), float(np.clip(prior_j, 0.0, 1.0))
 
 
-def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo_text: str, depth_p: float, talk_about_misinfo: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float) -> Tuple[float, float, List[str], bool]:
+def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo_text: str, depth_p: float, talk_about_misinfo: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
     client = build_client()
     depth = int(np.random.geometric(p=max(1e-3, min(0.999, depth_p))))
-    depth = min(depth, 4)
+    depth = min(depth, int(max(1, max_turns)))
     style_hint = (
         "Chat casually like two friends. Use 1-2 plain sentences. No markdown, no bullet points, "
         "no headings, no numbered lists, no bold/italics. Keep it natural and conversational."
@@ -152,7 +152,7 @@ def run_simulation(cfg: Dict) -> Dict:
                 talk_flag = (np.random.random() <= discuss_prob)
                 prev_u, prev_v = beliefs[u], beliefs[v]
                 b_i, b_j, turns, did_talk = llm_conversation_and_beliefs(
-                    model, personas[u], personas[v], misinfo_text, depth_p, talk_flag, prev_u, prev_v, w
+                    model, personas[u], personas[v], misinfo_text, depth_p, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
                 )
                 if print_convos and (print_all_convos or did_talk):
                     print(f"\n=== Conversation {u} <-> {v} ===")

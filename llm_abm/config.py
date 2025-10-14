@@ -21,6 +21,7 @@ DEFAULTS: Dict[str, Any] = {
     "edge_mean_degree": 4,
     "rounds": 10,
     "convo_depth_p": 0.6,
+    "max_convo_turns": 4,
     "edge_sample_frac": 0.5,
     "seed_nodes": [0, 1],
     "seed_belief": 0.98,
