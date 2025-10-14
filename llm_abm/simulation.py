@@ -58,8 +58,20 @@ def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo
         "Chat casually like two friends. Use 1-2 plain sentences. No markdown, no bullet points, "
         "no headings, no numbered lists, no bold/italics. Keep it natural and conversational."
     )
-    sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}."
-    sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}."
+    belief_guidance_i = (
+        f"Claim: {misinfo_text}. Your current belief that the claim is true is {prior_belief_i:.2f} (0-1). "
+        "If the claim is discussed, express views consistent with this belief (e.g., if high advocate, if low refute, if medium express uncertainty). Do not contradict your belief."
+    )
+    belief_guidance_j = (
+        f"Claim: {misinfo_text}. Your current belief that the claim is true is {prior_belief_j:.2f} (0-1). "
+        "If the claim is discussed, express views consistent with this belief (e.g., if high advocate, if low refute, if medium express uncertainty). Do not contradict your belief."
+    )
+    if talk_about_misinfo:
+        sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}. {belief_guidance_i}"
+        sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}. {belief_guidance_j}"
+    else:
+        sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}."
+        sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}."
 
     if talk_about_misinfo:
         last = f"Let's talk about this claim: {misinfo_text}"
@@ -129,7 +141,7 @@ def run_simulation(cfg: Dict) -> Dict:
     personas = sample_personas(n, segments)
     G = build_random_network(n, mean_deg, seed=rng_seed + 7)
 
-    beliefs = {i: (seed_belief if i in set(seed_nodes) else float(np.random.beta(2, 5))) for i in range(n)}
+    beliefs = {i: (seed_belief if i in set(seed_nodes) else 0.0) for i in range(n)}
     exposed = {i: (i in set(seed_nodes)) for i in range(n)}
 
     history: List[Dict] = []
