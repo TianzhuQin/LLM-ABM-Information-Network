@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Iterator, Any
 
 import numpy as np
 import networkx as nx
@@ -9,11 +9,11 @@ from .network import build_random_network
 from .llm import call_chat, build_client
 
 
-def llm_belief_number(model: str, misinfo_text: str) -> float:
+def llm_belief_number(model: str, information_text: str) -> float:
     client = build_client()
     messages = [
         {"role": "system", "content": "Answer strictly with a single number between 0 and 1."},
-        {"role": "user", "content": f"On a 0.0 to 1.0 scale, how strongly do you believe: {misinfo_text}\nOnly output a number."},
+        {"role": "user", "content": f"On a 0.0 to 1.0 scale, how strongly do you believe: {information_text}\nOnly output a number."},
     ]
     out = call_chat(client, model, messages, max_tokens_requested=16)
     val = float(out)
@@ -22,7 +22,7 @@ def llm_belief_number(model: str, misinfo_text: str) -> float:
     return float(val)
 
 
-def llm_belief_updates(model: str, misinfo_text: str, prior_i: float, prior_j: float, tie_weight: float, convo_turns: List[str]) -> Tuple[float, float]:
+def llm_belief_updates(model: str, information_text: str, prior_i: float, prior_j: float, tie_weight: float, convo_turns: List[str]) -> Tuple[float, float]:
     client = build_client()
     convo_text = "\n".join(convo_turns[-6:]) if convo_turns else ""
     sys = (
@@ -31,7 +31,7 @@ def llm_belief_updates(model: str, misinfo_text: str, prior_i: float, prior_j: f
         "Account for: their prior beliefs, the conversation content, and tie strength as social influence."
     )
     prompt = (
-        f"Claim: {misinfo_text}\n"
+        f"Claim: {information_text}\n"
         f"Prior belief of A: {prior_i:.3f}\n"
         f"Prior belief of B: {prior_j:.3f}\n"
         f"Tie strength (0-1): {float(np.clip(tie_weight, 0.0, 1.0)):.3f}\n"
@@ -50,7 +50,7 @@ def llm_belief_updates(model: str, misinfo_text: str, prior_i: float, prior_j: f
         return float(np.clip(prior_i, 0.0, 1.0)), float(np.clip(prior_j, 0.0, 1.0))
 
 
-def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo_text: str, depth_p: float, talk_about_misinfo: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
+def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, information_text: str, depth_p: float, talk_about_information: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
     client = build_client()
     depth = int(np.random.geometric(p=max(1e-3, min(0.999, depth_p))))
     depth = min(depth, int(max(1, max_turns)))
@@ -59,22 +59,22 @@ def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo
         "no headings, no numbered lists, no bold/italics. Keep it natural and conversational."
     )
     belief_guidance_i = (
-        f"Claim: {misinfo_text}. Your current belief that the claim is true is {prior_belief_i:.2f} (0-1). "
+        f"Claim: {information_text}. Your current belief that the claim is true is {prior_belief_i:.2f} (0-1). "
         "If the claim is discussed, express views consistent with this belief (e.g., if high advocate, if low refute, if medium express uncertainty). Do not contradict your belief."
     )
     belief_guidance_j = (
-        f"Claim: {misinfo_text}. Your current belief that the claim is true is {prior_belief_j:.2f} (0-1). "
+        f"Claim: {information_text}. Your current belief that the claim is true is {prior_belief_j:.2f} (0-1). "
         "If the claim is discussed, express views consistent with this belief (e.g., if high advocate, if low refute, if medium express uncertainty). Do not contradict your belief."
     )
-    if talk_about_misinfo:
+    if talk_about_information:
         sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}. {belief_guidance_i}"
         sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}. {belief_guidance_j}"
     else:
         sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}."
         sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}."
 
-    if talk_about_misinfo:
-        last = f"Let's talk about this claim: {misinfo_text}"
+    if talk_about_information:
+        last = f"Let's talk about this claim: {information_text}"
     else:
         last = "Let's just chat about something else."
 
@@ -86,14 +86,14 @@ def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, misinfo
         turns.append(f"{p_j.pid}: {out_j}")
         last = out_j
 
-    if talk_about_misinfo:
-        b_i, b_j = llm_belief_updates(model, misinfo_text, prior_belief_i, prior_belief_j, tie_weight, turns)
+    if talk_about_information:
+        b_i, b_j = llm_belief_updates(model, information_text, prior_belief_i, prior_belief_j, tie_weight, turns)
         return b_i, b_j, turns, True
     else:
         return None, None, turns, False
 
 
-def llm_societal_summary(model: str, misinfo_text: str, beliefs: List[float]) -> str:
+def llm_societal_summary(model: str, information_text: str, beliefs: List[float]) -> str:
     client = build_client()
     arr = np.array(beliefs, dtype=float)
     mean_b = float(np.mean(arr))
@@ -103,12 +103,12 @@ def llm_societal_summary(model: str, misinfo_text: str, beliefs: List[float]) ->
     stats = f"mean={mean_b:.2f}, median={med_b:.2f}, share>=0.7={hi:.2f}, share<=0.3={lo:.2f}"
     prompt = (
         "Given these stats, write ONE short sentence summarizing society's view. "
-        "Do not repeat numbers.\n" + f"Claim: {misinfo_text}\nStatistics: {stats}"
+        "Do not repeat numbers.\n" + f"Claim: {information_text}\nStatistics: {stats}"
     )
     return call_chat(build_client(), model, [{"role": "user", "content": prompt}], max_tokens_requested=64)
 
 
-def run_simulation(cfg: Dict) -> Dict:
+def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     model = cfg["model"]
     n = int(cfg["n"])
     mean_deg = int(cfg["edge_mean_degree"])
@@ -117,8 +117,8 @@ def run_simulation(cfg: Dict) -> Dict:
     edge_sample_frac = float(cfg["edge_sample_frac"])
     seed_nodes = list(cfg["seed_nodes"])
     seed_belief = float(cfg["seed_belief"])
-    misinfo_text = str(cfg["misinfo_text"])
-    discuss_prob = float(cfg["talk_misinfo_prob"])
+    information_text = str(cfg["information_text"])  # required
+    discuss_prob = float(cfg.get("talk_information_prob", 0.0))
     contagion_mode = str(cfg.get("contagion_mode", "llm"))
     complex_k = int(cfg.get("complex_threshold_k", 2))
     stop_when_stable = bool(cfg.get("stop_when_stable", False))
@@ -144,12 +144,19 @@ def run_simulation(cfg: Dict) -> Dict:
     beliefs = {i: (seed_belief if i in set(seed_nodes) else 0.0) for i in range(n)}
     exposed = {i: (i in set(seed_nodes)) for i in range(n)}
 
-    history: List[Dict] = []
     arr0 = [beliefs[i] for i in range(n)]
-    sum0 = llm_societal_summary(model, misinfo_text, arr0)
-    if print_rounds:
+    sum0 = llm_societal_summary(model, information_text, arr0)
+    if print_rounds and contagion_mode == "llm":
         print(f"Round 0 summary: {sum0}")
-    history.append({"round": 0, "coverage": {i for i in range(n) if exposed[i] and beliefs[i] > 0}, "beliefs": beliefs.copy(), "summary": sum0})
+    history_entry = {"round": 0, "coverage": {i for i in range(n) if exposed[i] and beliefs[i] > 0}, "beliefs": beliefs.copy(), "summary": sum0}
+    yield {
+        "t": 0,
+        "G": G,
+        "personas": personas,
+        "beliefs": beliefs,
+        "exposed": exposed,
+        "history_entry": history_entry,
+    }
 
     if contagion_mode == "llm":
         edges = list(G.edges(data=True))
@@ -164,14 +171,14 @@ def run_simulation(cfg: Dict) -> Dict:
                 talk_flag = (np.random.random() <= discuss_prob)
                 prev_u, prev_v = beliefs[u], beliefs[v]
                 b_i, b_j, turns, did_talk = llm_conversation_and_beliefs(
-                    model, personas[u], personas[v], misinfo_text, depth_p, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
+                    model, personas[u], personas[v], information_text, depth_p, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
                 )
                 if print_convos and (print_all_convos or did_talk):
                     print(f"\n=== Conversation {u} <-> {v} ===")
                     for line in turns:
                         print(line)
                     if not did_talk:
-                        print("(No misinformation discussed; beliefs unchanged.)")
+                        print("(No information discussed; beliefs unchanged.)")
                     print(f"=== End Conversation {u} <-> {v} ===\n")
                 if did_talk:
                     beliefs[u] = float(np.clip(b_i, 0.0, 1.0))
@@ -189,11 +196,19 @@ def run_simulation(cfg: Dict) -> Dict:
                             )
             cov = {i for i in range(n) if exposed[i] and beliefs[i] > 0}
             arr_t = [beliefs[i] for i in range(n)]
-            sum_t = llm_societal_summary(model, misinfo_text, arr_t)
+            sum_t = llm_societal_summary(model, information_text, arr_t)
             if print_rounds:
                 print(f"Round {t}: {len(cov)}/{n} exposed/believing > 0")
                 print(f"Round {t} summary: {sum_t}")
-            history.append({"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t})
+            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t}
+            yield {
+                "t": t,
+                "G": G,
+                "personas": personas,
+                "beliefs": beliefs,
+                "exposed": exposed,
+                "history_entry": history_entry,
+            }
             if stop_when_stable:
                 max_diff = max(abs(beliefs[i] - prev_beliefs[i]) for i in range(n))
                 if max_diff <= stability_tol:
@@ -220,18 +235,40 @@ def run_simulation(cfg: Dict) -> Dict:
             exposed = next_exposed
             cov = {i for i in range(n) if exposed[i] and beliefs[i] > 0}
             arr_t = [beliefs[i] for i in range(n)]
-            sum_t = llm_societal_summary(model, misinfo_text, arr_t)
-            history.append({"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t})
+            sum_t = llm_societal_summary(model, information_text, arr_t)
+            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t}
+            yield {
+                "t": t,
+                "G": G,
+                "personas": personas,
+                "beliefs": beliefs,
+                "exposed": exposed,
+                "history_entry": history_entry,
+            }
             if stop_when_stable:
                 max_diff = max(abs(beliefs[i] - prev_beliefs[i]) for i in range(n))
                 if max_diff <= stability_tol:
                     break
 
+
+def run_simulation(cfg: Dict) -> Dict:
+    history: List[Dict] = []
+    G = None
+    personas = None
+    beliefs = None
+    exposed = None
+    for state in iterate_simulation(cfg):
+        G = state["G"]
+        personas = state["personas"]
+        beliefs = dict(state["beliefs"])  # snapshot
+        exposed = dict(state["exposed"])  # snapshot
+        history.append(state["history_entry"])
     return {
         "G": G,
         "personas": personas,
         "beliefs": beliefs,
         "history": history,
     }
+
 
 

@@ -25,8 +25,8 @@ DEFAULTS: Dict[str, Any] = {
     "edge_sample_frac": 0.5,
     "seed_nodes": [0, 1],
     "seed_belief": 0.98,
-    "misinfo_text": "5G towers cause illness.",
-    "talk_misinfo_prob": 0.25,
+    "information_text": "5G towers cause illness.",
+    "talk_information_prob": 0.25,
     "contagion_mode": "llm",  # 'llm' | 'simple' | 'complex'
     "complex_threshold_k": 2,
     "stop_when_stable": False,
@@ -98,5 +98,6 @@ def load_config(source: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
     if isinstance(seeds, str):
         merged["seed_nodes"] = [int(x) for x in seeds.split(",") if x.strip() != ""]
     return merged
+
 
 

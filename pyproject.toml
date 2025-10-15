@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-society"
+dynamic = ["version"]
+description = "LLM-driven agent-based information diffusion simulation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Tianzhu Qin" }]
+
+[project.urls]
+Homepage = "https://github.com/TianzhuQin/LLM-ABM-Information-Network"
+Repository = "https://github.com/TianzhuQin/LLM-ABM-Information-Network.git"
+Issues = "https://github.com/TianzhuQin/LLM-ABM-Information-Network/issues"
+keywords = ["agent-based", "simulation", "llm", "information", "diffusion", "networks"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+dependencies = [
+  "openai>=1.14.0",
+  "numpy>=1.24.0",
+  "pandas>=2.0.0",
+  "networkx>=3.1",
+  "matplotlib>=3.7.0",
+  "pyyaml>=6.0.0",
+]
+
+[project.scripts]
+llm-society = "llm_society.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_society*"]
+
+[tool.setuptools.package-data]
+llm_society = ["data/*.yaml"]
+
+[tool.setuptools.dynamic]
+version = { attr = "llm_society.__version__" }
+
+

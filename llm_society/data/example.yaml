@@ -1,5 +1,5 @@
 ###############################################
-# LLM-ABM Simulation Config (example, full)
+# LLM-Society Simulation Config (example, full)
 ###############################################
 
 # Model to use for conversations and summaries
@@ -29,11 +29,11 @@ seed_nodes: [0, 1]
 # Belief value for seed nodes (0-1)
 seed_belief: 0.98
 
-# Misinformation text (claim discussed when sampled)
-misinfo_text: "Dogs are better than cat."
+# Information text (claim discussed when sampled)
+information_text: "Dogs are better than cats."
 
-# Probability a sampled edge talks about the misinformation this round
-talk_misinfo_prob: 0.75
+# Probability a sampled edge talks about the information this round
+talk_information_prob: 0.75
 
 # Contagion mode: 'llm' | 'simple' | 'complex'
 contagion_mode: llm
@@ -87,11 +87,12 @@ api_key_file: api-key.txt
 
 # Printing controls
 # - print_conversations: print conversations
-# - print_all_conversations: include casual (non-misinformation) conversations
-# - print_belief_updates: print belief changes when misinformation discussed
+# - print_all_conversations: include casual (non-information) conversations
+# - print_belief_updates: print belief changes when information discussed
 # - print_round_summaries: print round summaries
 print_conversations: true
 print_all_conversations: true
 print_belief_updates: true
 print_round_summaries: true
+
 
