@@ -9,7 +9,7 @@ description = "LLM-driven agent-based information diffusion simulation"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Tianzhu Qin" }]
+authors = [{ name = "Tianzhu Qin", email = "tianzhu@stanford.edu" }]
 keywords = [
   "agent-based",
   "simulation",
