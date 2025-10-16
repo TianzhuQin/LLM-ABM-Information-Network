@@ -10,18 +10,19 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Tianzhu Qin" }]
-
-[project.urls]
-Homepage = "https://github.com/TianzhuQin/LLM-ABM-Information-Network"
-Repository = "https://github.com/TianzhuQin/LLM-ABM-Information-Network.git"
-Issues = "https://github.com/TianzhuQin/LLM-ABM-Information-Network/issues"
-keywords = ["agent-based", "simulation", "llm", "information", "diffusion", "networks"]
+keywords = [
+  "agent-based",
+  "simulation",
+  "llm",
+  "information",
+  "diffusion",
+  "networks",
+]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-
 dependencies = [
   "openai>=1.14.0",
   "numpy>=1.24.0",
@@ -30,6 +31,11 @@ dependencies = [
   "matplotlib>=3.7.0",
   "pyyaml>=6.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TianzhuQin/LLM-ABM-Information-Network"
+Repository = "https://github.com/TianzhuQin/LLM-ABM-Information-Network.git"
+Issues = "https://github.com/TianzhuQin/LLM-ABM-Information-Network/issues"
 
 [project.scripts]
 llm-society = "llm_society.cli:main"
