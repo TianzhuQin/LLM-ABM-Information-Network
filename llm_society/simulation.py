@@ -149,7 +149,7 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     exposed = {i: (i in set(seed_nodes)) for i in range(n)}
 
     arr0 = [beliefs[i] for i in range(n)]
-    sum0 = llm_societal_summary(model, information_text, arr0)
+    sum0 = llm_societal_summary(model, information_text, arr0) if contagion_mode == "llm" else ""
     if print_rounds and contagion_mode == "llm":
         print(f"Round 0 summary: {sum0}")
     history_entry = {"round": 0, "coverage": {i for i in range(n) if exposed[i] and beliefs[i] > 0}, "beliefs": beliefs.copy(), "summary": sum0}
@@ -239,8 +239,9 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
             exposed = next_exposed
             cov = {i for i in range(n) if exposed[i] and beliefs[i] > 0}
             arr_t = [beliefs[i] for i in range(n)]
-            sum_t = llm_societal_summary(model, information_text, arr_t)
-            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t}
+            sum_t = ""
+            history_entry = {"round": t, "coverage": cov, "belie
+fs": beliefs.copy(), "summary": sum_t}
             yield {
                 "t": t,
                 "G": G,
