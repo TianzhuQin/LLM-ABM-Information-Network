@@ -7,6 +7,7 @@ import networkx as nx
 from .persona import Persona, sample_personas, persona_to_text
 from .network import build_random_network
 from .llm import call_chat, build_client
+from .config import DEFAULTS
 
 
 def llm_belief_number(model: str, information_text: str) -> float:
@@ -50,9 +51,12 @@ def llm_belief_updates(model: str, information_text: str, prior_i: float, prior_
         return float(np.clip(prior_i, 0.0, 1.0)), float(np.clip(prior_j, 0.0, 1.0))
 
 
-def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, information_text: str, depth_p: float, talk_about_information: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
+def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, information_text: str, depth_intensity: float, talk_about_information: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
     client = build_client()
-    depth = int(np.random.geometric(p=max(1e-3, min(0.999, depth_p))))
+    # Map intensity [0,1] -> geometric parameter p in (0,1]
+    # Lower p -> longer expected conversation; intensity=0 -> very shallow (p≈1)
+    p_geo = float(max(0.05, min(1.0, 1.0 - 0.95 * float(max(0.0, min(1.0, depth_intensity))))))
+    depth = int(np.random.geometric(p=p_geo))
     depth = min(depth, int(max(1, max_turns)))
     style_hint = (
         "Chat casually like two friends. Use 1-2 plain sentences. No markdown, no bullet points, "
@@ -113,7 +117,7 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     n = int(cfg["n"])
     mean_deg = int(cfg["edge_mean_degree"])
     rounds = int(cfg["rounds"])
-    depth_p = float(cfg["convo_depth_p"])
+    depth_intensity = float(cfg.get("depth", cfg.get("convo_depth_p", DEFAULTS["depth"])))
     edge_sample_frac = float(cfg["edge_sample_frac"])
     seed_nodes = list(cfg["seed_nodes"])
     seed_belief = float(cfg["seed_belief"])
@@ -171,7 +175,7 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
                 talk_flag = (np.random.random() <= discuss_prob)
                 prev_u, prev_v = beliefs[u], beliefs[v]
                 b_i, b_j, turns, did_talk = llm_conversation_and_beliefs(
-                    model, personas[u], personas[v], information_text, depth_p, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
+                    model, personas[u], personas[v], information_text, depth_intensity, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
                 )
                 if print_convos and (print_all_convos or did_talk):
                     print(f"\n=== Conversation {u} <-> {v} ===")

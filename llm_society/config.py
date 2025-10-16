@@ -20,7 +20,7 @@ DEFAULTS: Dict[str, Any] = {
     "n": 20,
     "edge_mean_degree": 4,
     "rounds": 10,
-    "convo_depth_p": 0.6,
+    "depth": 0.6,  # 0-1 intensity: 0=very shallow, 1=very deep
     "max_convo_turns": 4,
     "edge_sample_frac": 0.5,
     "seed_nodes": [0, 1],
@@ -89,6 +89,20 @@ def load_config(source: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
     merged = dict(DEFAULTS)
     for k, v in (cfg or {}).items():
         merged[k] = v
+
+    # Backward compatibility: allow legacy 'convo_depth_p' to set 'depth'
+    if "depth" not in merged and "convo_depth_p" in merged:
+        try:
+            merged["depth"] = float(merged["convo_depth_p"])  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+    # Accept 'degree' as alias for 'edge_mean_degree'
+    if "degree" in merged:
+        try:
+            merged["edge_mean_degree"] = int(merged["degree"])  # type: ignore[arg-type]
+        except Exception:
+            pass
 
     # Normalize certain types/keys
     merged["contagion_mode"] = str(merged.get("contagion_mode", "llm")).lower()

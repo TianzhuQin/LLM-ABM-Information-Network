@@ -19,7 +19,10 @@ pip install -e .
 ```
 3. Set OpenAI API key via env var or add `api-key.txt` (single line):
 ```bash
-export OPENAI_API_KEY=sk-...your_key...
+# Preferred: environment variable
+export OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
+# Or: file (gitignored)
+echo "<YOUR_OPENAI_API_KEY>" > api-key.txt
 ```
 
 Run from CLI
@@ -29,43 +32,46 @@ llm-society --write-example-config my-config.yaml
 
 # run the simulation with your config
 llm-society --config my-config.yaml
+
+# override selected parameters via flags
+llm-society --config my-config.yaml --depth 0.8 --rounds 20
+
+# run fully via flags (no config file)
+llm-society \
+  --information "5G towers cause illness." \
+  --n 20 --degree 4 --rounds 10 \
+  --depth 0.6 --depth-max 6 --edge-frac 0.5 \
+  --seeds 0,1 --seed-belief 0.98 --talk-prob 0.25 \
+  --mode llm --complex-k 2 --rng 0 --model gpt-4.1
 ```
 
 Use in Notebook
 Example snippet:
-```python
-from llm_society.config import load_config
-from llm_society.simulation import run_simulation
-from llm_society.viz import plot_coverage_over_time, plot_final_beliefs
-from llm_society import network
 
-cfg = load_config('config/example.yaml')
-result = run_simulation(cfg)
-plot_coverage_over_time(result['history'])
-plot_final_beliefs(result['G'], result['beliefs'])
-```
-
-Object-oriented API
 ```python
 from llm_society import network
 
 net = network(n=5, degree=2, rounds=10, depth=0.6, depth_max=6,
-              edge_frac=0.5, seeds=[0,1], seed_belief=0.98,
-              claim="5G towers cause illness.", talk_prob=0.25,
-              mode="llm", complex_k=2, rng=0)
+             edge_frac=0.5, seeds=[0,1], seed_belief=0.98,
+             information="5G towers cause illness.", talk_prob=0.25,
+             mode="llm", complex_k=2, rng=0)
 net.simulate()   # prints conversations, belief updates, summaries
 net.plot()       # coverage curve + final beliefs graph
 net.nodes[1].plot()  # single-node belief trajectory
 ```
 
 Config Schema
-See `config/example.yaml`. Key fields:
-- `n`, `edge_mean_degree`, `rounds`, `convo_depth_p`, `edge_sample_frac`
+See `llm_society/data/example.yaml`. Key fields:
+- `n`, `degree`, `rounds`, `depth` (0-1), `max_convo_turns`, `edge_sample_frac`
 - `seed_nodes`, `seed_belief`, `information_text`, `talk_information_prob`
 - `contagion_mode`: `llm` | `simple` | `complex`; `complex_threshold_k`
 - `persona_segments`: list of segments with `proportion` and `traits`.
   - Trait values can be fixed strings, weighted `choices`, or numeric distributions (`dist: normal`, or `uniform: [a,b]`).
   - Extra traits allowed and included in prompts.
+
+Depth interpretation:
+- `depth` ∈ [0,1] controls conversation length tendency. Higher means longer conversations.
+- Internally mapped to a geometric distribution; `depth=0` → very short; `depth=1` → near the `max_convo_turns` cap often.
 
 License
 MIT

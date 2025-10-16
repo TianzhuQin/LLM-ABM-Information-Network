@@ -26,7 +26,7 @@ class Network:
         n: int = DEFAULTS["n"],
         degree: int = DEFAULTS["edge_mean_degree"],
         rounds: int = DEFAULTS["rounds"],
-        depth: float = DEFAULTS["convo_depth_p"],
+        depth: float = DEFAULTS["depth"],
         depth_max: int = DEFAULTS["max_convo_turns"],
         edge_frac: float = DEFAULTS["edge_sample_frac"],
         seeds: Optional[List[int]] = None,
@@ -52,8 +52,9 @@ class Network:
         self.n = int(n)
         self.degree = int(degree)
         self.rounds = int(rounds)
-        self.depth_p = float(depth)
+        # depth: 0-1 intensity for conversation length tendency
         self.depth = int(depth_max)
+        self.depth_intensity = float(max(0.0, min(1.0, depth)))
         self.edge_frac = float(edge_frac)
         self.seeds = list(seeds) if seeds is not None else list(DEFAULTS["seed_nodes"])  # copy
         self.seed_belief = float(seed_belief)
@@ -83,7 +84,7 @@ class Network:
             "n": self.n,
             "edge_mean_degree": self.degree,
             "rounds": self.rounds,
-            "convo_depth_p": self.depth_p,
+            "depth": self.depth_intensity,
             "max_convo_turns": self.depth,
             "edge_sample_frac": self.edge_frac,
             "seed_nodes": list(self.seeds),
@@ -177,7 +178,7 @@ def network(*, information: str, config: Optional[Dict[str, Any]] = None, config
             n=int(cfg["n"]),
             degree=int(cfg["edge_mean_degree"]),
             rounds=int(cfg["rounds"]),
-            depth=float(cfg["convo_depth_p"]),
+            depth=float(cfg.get("depth", cfg.get("convo_depth_p", DEFAULTS["depth"]))),
             depth_max=int(cfg["max_convo_turns"]),
             edge_frac=float(cfg["edge_sample_frac"]),
             seeds=list(cfg["seed_nodes"]),
