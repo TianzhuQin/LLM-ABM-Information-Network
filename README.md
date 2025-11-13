@@ -5,9 +5,12 @@ A modular repo to simulate information diffusion using LLM-based agent conversat
 Features
 - Segment-based persona configuration (proportions, flexible trait specs)
 - Random network generation with tie strengths
-- LLM-driven conversations and belief updates, or simple/complex contagion modes
+- LLM-driven conversations and numeric scoring in [0,1] (metric-based), or simple/complex contagion modes
 - YAML/JSON config + CLI
 - Visualization utilities and notebook integration
+
+Tutorial
+- See the end-to-end guide in `docs/TUTORIAL.md` for installation, API quickstart, plotting, grouping, interventions, and export examples.
 
 Install
 1. Python 3.10+
@@ -49,22 +52,27 @@ Use in Notebook
 Example snippet:
 
 ```python
-from llm_society import network
+from llm_society.api import network
+from llm_society.viz import set_theme
 
-net = network(n=5, degree=2, rounds=10, depth=0.6, depth_max=6,
-             edge_frac=0.5, seeds=[0,1], seed_belief=0.98,
-             information="5G towers cause illness.", talk_prob=0.25,
-             mode="llm", complex_k=2, rng=0)
-net.simulate()   # prints conversations, belief updates, summaries
-net.plot()       # coverage curve + final beliefs graph
-net.nodes[1].plot()  # single-node belief trajectory
+set_theme()
+net = network(
+  information="5G towers cause illness.",
+  n=20, degree=4, rounds=10,
+  talk_prob=0.25, mode="llm", complex_k=2, rng=0
+)
+net.simulate()             # prints conversations, score updates, summaries
+net.plot(type="animation") # animated network of scores
+net.plot(type="final_scores")
+net.nodes[1].plot()        # single-node score trajectory
 ```
 
 Config Schema
 See `llm_society/data/example.yaml`. Key fields:
 - `n`, `degree`, `rounds`, `depth` (0-1), `max_convo_turns`, `edge_sample_frac`
-- `seed_nodes`, `seed_belief`, `information_text`, `talk_information_prob`
+- `seed_nodes`, `seed_score` (or legacy `seed_belief`), `information_text`, `talk_information_prob`
 - `contagion_mode`: `llm` | `simple` | `complex`; `complex_threshold_k`
+- Metric controls (LLM mode): `metric_name`, `metric_prompt`
 - `persona_segments`: list of segments with `proportion` and `traits`.
   - Trait values can be fixed strings, weighted `choices`, or numeric distributions (`dist: normal`, or `uniform: [a,b]`).
   - Extra traits allowed and included in prompts.

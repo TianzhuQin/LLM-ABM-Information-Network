@@ -20,11 +20,19 @@ DEFAULTS: Dict[str, Any] = {
     "n": 20,
     "edge_mean_degree": 4,
     "rounds": 10,
+    # Metric settings
+    # Default metric is "credibility" scored as a probability in [0,1]
+    "metric_name": "credibility",
+    "metric_prompt": (
+        "On a 0.0 to 1.0 scale, rate the perceived credibility of the following claim "
+        "as a probability that it is true. Return ONLY a single number between 0 and 1."
+    ),
     "depth": 0.6,  # 0-1 intensity: 0=very shallow, 1=very deep
     "max_convo_turns": 4,
     "edge_sample_frac": 0.5,
     "seed_nodes": [0, 1],
-    "seed_belief": 0.98,
+    "seed_belief": 0.98,  # legacy name
+    "seed_score": 0.98,   # preferred name
     "information_text": "5G towers cause illness.",
     "talk_information_prob": 0.25,
     "contagion_mode": "llm",  # 'llm' | 'simple' | 'complex'
@@ -116,6 +124,15 @@ def load_config(source: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
     seeds = merged.get("seed_nodes")
     if isinstance(seeds, str):
         merged["seed_nodes"] = [int(x) for x in seeds.split(",") if x.strip() != ""]
+    # normalize seed score key (prefer 'seed_score', accept legacy 'seed_belief')
+    if "seed_score" not in merged:
+        if "seed_belief" in merged:
+            try:
+                merged["seed_score"] = float(merged["seed_belief"])  # type: ignore[arg-type]
+            except Exception:
+                merged["seed_score"] = float(DEFAULTS["seed_score"])
+        else:
+            merged["seed_score"] = float(DEFAULTS["seed_score"])
     return merged
 
 

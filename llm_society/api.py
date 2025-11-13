@@ -17,7 +17,7 @@ class NodeProxy:
     def plot(self) -> None:
         if self._net._history is None:
             raise RuntimeError("Call simulate() before plotting node trajectories.")
-        viz.plot_belief_trajectories(self._net._history, [self.id])
+        viz.plot_belief_trajectories(self._net._history, [self.id], metric_label=self._net.metric_name.capitalize())
 
 
 class Network:
@@ -26,6 +26,8 @@ class Network:
         *,
         information: str,
         n: int = DEFAULTS["n"],
+        metric_name: str = DEFAULTS["metric_name"],
+        metric_prompt: str = DEFAULTS["metric_prompt"],
         degree: int = DEFAULTS["edge_mean_degree"],
         rounds: int = DEFAULTS["rounds"],
         depth: float = DEFAULTS["depth"],
@@ -58,6 +60,8 @@ class Network:
         # If a custom graph is provided, override n from graph
         self._custom_graph = graph
         self.n = int(graph.number_of_nodes()) if graph is not None else int(n)
+        self.metric_name = str(metric_name)
+        self.metric_prompt = str(metric_prompt)
         self.degree = int(degree)
         self.rounds = int(rounds)
         # depth: 0-1 intensity for conversation length tendency
@@ -85,7 +89,7 @@ class Network:
 
         self._result: Optional[Dict[str, Any]] = None
         self._history: Optional[List[Dict[str, Any]]] = None
-        self._beliefs: Optional[Dict[int, float]] = None
+        self._scores: Optional[Dict[int, float]] = None
         self._G = None
         self._personas: Optional[List[Any]] = None
         self.nodes: List[NodeProxy] = []
@@ -94,6 +98,8 @@ class Network:
         return {
             "model": self.model,
             "n": self.n,
+            "metric_name": self.metric_name,
+            "metric_prompt": self.metric_prompt,
             "edge_mean_degree": self.degree,
             "rounds": self.rounds,
             "depth": self.depth_intensity,
@@ -124,7 +130,7 @@ class Network:
         cfg = self._make_cfg()
         self._result = run_simulation(cfg)
         self._history = self._result["history"]
-        self._beliefs = self._result["beliefs"]
+        self._scores = self._result.get("scores", self._result.get("beliefs"))
         self._G = self._result["G"]
         self._personas = self._result["personas"]
         self.nodes = [NodeProxy(self, i) for i in range(self.n)]
@@ -142,7 +148,8 @@ class Network:
         except StopIteration:
             return False
         self._G = state["G"]
-        self._beliefs = dict(state["beliefs"])
+        # prefer scores, fallback to beliefs for backward compatibility
+        self._scores = dict(state.get("scores", state.get("beliefs", {})))
         self._personas = state["personas"]
         if self._history is None:
             self._history = []
@@ -152,9 +159,9 @@ class Network:
         return True
 
     def plot(self, save: Optional[str] = None) -> None:
-        if self._history is None or self._beliefs is None or self._G is None:
+        if self._history is None or self._scores is None or self._G is None:
             raise RuntimeError("Call simulate() before plot().")
-        ani = viz.show_animation(self._history, self._G)
+        ani = viz.show_animation(self._history, self._G, metric_label=self.metric_name.capitalize())
         if save:
             viz.save_animation(ani, save)
 
@@ -182,7 +189,7 @@ class Network:
           - If the first arg historically looked like a filename and not a known type,
             we treat it as 'save' and default to animation.
         """
-        if self._history is None or self._beliefs is None or self._G is None:
+        if self._history is None or self._scores is None or self._G is None:
             raise RuntimeError("Call simulate() before plot().")
 
         # Legacy support: allow plot_type kw to set 'type'
@@ -193,7 +200,7 @@ class Network:
             else:
                 kwargs.pop("plot_type")
 
-        allowed = {"animation", "coverage", "final_beliefs", "group_beliefs", "centrality", "intervention_effect"}
+        allowed = {"animation", "coverage", "final_scores", "final_beliefs", "group", "group_beliefs", "centrality", "intervention_effect"}
         # Back-compat rescue: if first arg looks like a filename and not a known type
         if type not in allowed and save is None:
             # treat plot_type as 'save' and default to animation
@@ -201,7 +208,7 @@ class Network:
             type = "animation"
 
         if type == "animation":
-            ani = viz.show_animation(self._history, self._G)
+            ani = viz.show_animation(self._history, self._G, metric_label=self.metric_name.capitalize())
             if save:
                 viz.save_animation(ani, save)
             return
@@ -211,20 +218,34 @@ class Network:
             return
 
         if type == "final_beliefs":
-            viz.plot_final_beliefs(self._G, self._beliefs)
+            # backward-compat: map to final_scores
+            type = "final_scores"
+        if type == "final_scores":
+            viz.plot_final_scores(self._G, self._scores, metric_label=self.metric_name.capitalize())
             return
 
-        if type == "group_beliefs":
+        if type in {"group", "group_beliefs"}:
+            # 'group' is preferred; 'group_beliefs' kept for backward-compat
+            by = kwargs.get("by", "traits")  # 'traits' | 'segment'
             attr = kwargs.get("attr", "political")
             groups = kwargs.get("groups", None)
             if getattr(self, "_personas", None) is None:
                 raise RuntimeError("Personas are required for group plots. Run simulate() first.")
-            viz.plot_group_beliefs_over_time(self._history, self._personas, attr=attr, groups=groups)
+            viz.plot_group_over_time(
+                self._history,
+                self._personas,
+                attr=attr,
+                groups=groups,
+                segments=self.segments,
+                metric_label=self.metric_name.capitalize(),
+                by=by,
+            )
             return
 
         if type == "centrality":
             metric = kwargs.get("metric", "degree")
-            viz.plot_centrality_vs_belief_exposure(self._G, self._history, metric=metric)
+            show_exposure = kwargs.get("show_exposure", False)
+            viz.plot_centrality_vs_score_exposure(self._G, self._history, metric=metric, metric_label=self.metric_name.capitalize(), show_exposure=show_exposure)
             return
 
         if type == "intervention_effect":
@@ -235,7 +256,16 @@ class Network:
                     if h.get("intervention_active"):
                         intervention_round = h.get("intervention_round", None)
                         break
-            viz.plot_intervention_effect(self._history, intervention_round=intervention_round)
+            attr = kwargs.get("attr", None)
+            groups = kwargs.get("groups", None)
+            viz.plot_intervention_effect(
+                self._history,
+                intervention_round=intervention_round,
+                attr=attr,
+                groups=groups,
+                segments=self.segments,
+                metric_label=self.metric_name.capitalize(),
+            )
             return
 
         raise ValueError(f"Unknown type: {type}")
@@ -248,9 +278,15 @@ class Network:
 
     @property
     def beliefs(self) -> Dict[int, float]:
-        if self._beliefs is None:
+        if self._scores is None:
             raise RuntimeError("Call simulate() first to populate beliefs.")
-        return self._beliefs
+        return self._scores
+
+    @property
+    def scores(self) -> Dict[int, float]:
+        if self._scores is None:
+            raise RuntimeError("Call simulate() first to populate scores.")
+        return self._scores
 
     @property
     def graph(self):
@@ -287,12 +323,12 @@ class Network:
 
     def summary(self) -> Dict[str, Any]:
         """Return quick metrics summary for the run."""
-        if self._history is None or self._beliefs is None:
+        if self._history is None or self._scores is None:
             raise RuntimeError("Call simulate() first.")
         n = self.n
         cov_series = [len(h.get("coverage", [])) for h in self._history]
         final_cov = cov_series[-1] if cov_series else 0
-        mean_belief = float(sum(self._beliefs.values()) / max(1, len(self._beliefs)))
+        mean_belief = float(sum(self._scores.values()) / max(1, len(self._scores)))
         # t_50: first round where coverage >= 50% of n
         t_50 = None
         target = 0.5 * n
@@ -311,8 +347,8 @@ class Network:
                     groups.setdefault(key, []).append(i)
             if groups.get("Democrat") and groups.get("Republican"):
                 import numpy as np  # local import
-                dem = np.array([self._beliefs.get(i, float("nan")) for i in groups["Democrat"]], dtype=float)
-                rep = np.array([self._beliefs.get(i, float("nan")) for i in groups["Republican"]], dtype=float)
+                dem = np.array([self._scores.get(i, float("nan")) for i in groups["Democrat"]], dtype=float)
+                rep = np.array([self._scores.get(i, float("nan")) for i in groups["Republican"]], dtype=float)
                 pol_gap = float(np.nanmean(rep) - np.nanmean(dem))
         except Exception:
             pass
@@ -324,9 +360,137 @@ class Network:
             "polarization_gap_rep_minus_dem": pol_gap,
         }
 
+    def summary_report(self, width: int = 88) -> str:
+        """Return a professional, OLS-like text report summarizing the run."""
+        if self._history is None or self._scores is None:
+            raise RuntimeError("Call simulate() first.")
+        import numpy as np  # local import
+        metric_label = str(self.metric_name).capitalize()
+
+        def line(char: str = "─") -> str:
+            return char * max(20, width)
+
+        def kv(label: str, value: str, sep: str = ":") -> str:
+            left = f"{label}{sep} "
+            pad = max(1, 28 - len(label))
+            return f"{label}{sep}{' ' * pad}{value}"
+
+        n = int(self.n)
+        rounds = int(max(0, len(self._history) - 1))
+        cov_series = [len(h.get("coverage", [])) for h in self._history]
+        final_cov = cov_series[-1] if cov_series else 0
+        # time-to-50% coverage
+        t_50 = None
+        target = 0.5 * n
+        for h in self._history:
+            if len(h.get("coverage", [])) >= target:
+                t_50 = int(h["round"])
+                break
+
+        # belief statistics
+        b = np.array([float(self._scores.get(i, np.nan)) for i in sorted(self._scores.keys())], dtype=float)
+        mean_b = float(np.nanmean(b)) if b.size else float("nan")
+        med_b = float(np.nanmedian(b)) if b.size else float("nan")
+        std_b = float(np.nanstd(b, ddof=1)) if b.size > 1 else float("nan")
+        p10 = float(np.nanpercentile(b, 10)) if b.size else float("nan")
+        p90 = float(np.nanpercentile(b, 90)) if b.size else float("nan")
+        share_hi = float(np.nanmean(b >= 0.7)) if b.size else float("nan")
+        share_lo = float(np.nanmean(b <= 0.3)) if b.size else float("nan")
+
+        # polarization (if political groups available)
+        pol = {"Democrat": float("nan"), "Republican": float("nan"), "gap_rep_minus_dem": float("nan")}
+        try:
+            groups: Dict[str, List[int]] = {}
+            for i, p in enumerate(self._personas or []):
+                key = getattr(p, "political", None) or (p.extra.get("political") if getattr(p, "extra", None) else None)
+                key = str(key) if key is not None else None
+                if key:
+                    groups.setdefault(key, []).append(i)
+            if groups.get("Democrat"):
+                dem = np.array([self._beliefs.get(i, np.nan) for i in groups["Democrat"]], dtype=float)
+                pol["Democrat"] = float(np.nanmean(dem))
+            if groups.get("Republican"):
+                rep = np.array([self._beliefs.get(i, np.nan) for i in groups["Republican"]], dtype=float)
+                pol["Republican"] = float(np.nanmean(rep))
+            if np.isfinite(pol["Democrat"]) and np.isfinite(pol["Republican"]):
+                pol["gap_rep_minus_dem"] = float(pol["Republican"] - pol["Democrat"])
+        except Exception:
+            pass
+
+        # correlations with degree centrality (quick read)
+        corr_degree = float("nan")
+        try:
+            import networkx as nx  # local import
+            cent = nx.degree_centrality(self._G)
+            x = np.array([float(cent.get(i, 0.0)) for i in sorted(self._scores.keys())], dtype=float)
+            y = np.array([float(self._scores.get(i, np.nan)) for i in sorted(self._scores.keys())], dtype=float)
+            if np.isfinite(x).sum() > 1 and np.isfinite(y).sum() > 1:
+                corr_degree = float(np.corrcoef(x, y)[0, 1])
+        except Exception:
+            pass
+
+        # model and config info
+        model_name = str(self.model)
+        mode = str(self.mode)
+        info = [
+            kv("Model", model_name),
+            kv("Mode", mode),
+            kv("Agents (n)", str(n)),
+            kv("Rounds", str(rounds)),
+            kv("Mean degree", str(self.degree)),
+            kv("Edge sampling frac", f"{self.edge_frac:.2f}"),
+            kv("Talk prob", f"{self.talk_prob:.2f}"),
+            kv("Convo depth intensity", f"{self.depth_intensity:.2f}"),
+        ]
+        if self.intervention_round is not None:
+            info.extend(
+                [
+                    kv("Intervention round", str(self.intervention_round)),
+                    kv("Intervention nodes", f"{len(self.intervention_nodes)} selected"),
+                ]
+            )
+
+        # assemble report
+        rows: List[str] = []
+        rows.append("LLM Society Simulation Summary".center(max(20, width)))
+        rows.append(line("═"))
+        rows.append("Model Information")
+        rows.append(line())
+        rows += info
+        rows.append("")
+        rows.append("Fit Statistics")
+        rows.append(line())
+        rows.append(kv("Final coverage", f"{final_cov} ({final_cov/n:.2%} of n)"))
+        rows.append(kv("Time to 50% coverage", "—" if t_50 is None else f"t = {t_50}"))
+        rows.append(kv(f"{metric_label} mean (std)", f"{mean_b:.3f} ({std_b:.3f})"))
+        rows.append(kv(f"{metric_label} median [p10, p90]", f"{med_b:.3f} [{p10:.3f}, {p90:.3f}]"))
+        rows.append(kv(f"Share {metric_label.lower()} ≥ 0.7", f"{share_hi:.2%}"))
+        rows.append(kv(f"Share {metric_label.lower()} ≤ 0.3", f"{share_lo:.2%}"))
+        rows.append(kv(f"Corr({metric_label.lower()}, degree)", f"{corr_degree:.2f}"))
+        # group diff section (only if available)
+        if np.isfinite(pol.get("Democrat", float("nan"))) or np.isfinite(pol.get("Republican", float("nan"))):
+            rows.append("")
+            rows.append("Group Differences (political)")
+            rows.append(line())
+            if np.isfinite(pol.get("Democrat", float("nan"))):
+                rows.append(kv(f"Mean {metric_label.lower()} (Democrat)", f"{pol['Democrat']:.3f}"))
+            if np.isfinite(pol.get("Republican", float("nan"))):
+                rows.append(kv(f"Mean {metric_label.lower()} (Republican)", f"{pol['Republican']:.3f}"))
+            if np.isfinite(pol.get("gap_rep_minus_dem", float("nan"))):
+                rows.append(kv("Gap (Rep - Dem)", f"{pol['gap_rep_minus_dem']:.3f}"))
+        # last round LLM sentence, if present
+        txt = str(self._history[-1].get("summary", "") or "").strip()
+        if txt:
+            rows.append("")
+            rows.append("LLM Narrative Summary (last round)")
+            rows.append(line())
+            rows.append(txt)
+        rows.append(line("═"))
+        return "\n".join(rows)
+
     def export(self, history_csv: Optional[str] = None, beliefs_csv: Optional[str] = None, conversations_jsonl: Optional[str] = None) -> None:
         """Export results to files. CSV requires pandas."""
-        if self._history is None or self._beliefs is None:
+        if self._history is None or self._scores is None:
             raise RuntimeError("Call simulate() first.")
         if history_csv or beliefs_csv:
             import pandas as pd  # local import
@@ -342,9 +506,10 @@ class Network:
         if beliefs_csv:
             rounds = [h["round"] for h in self._history]
             data: Dict[str, Any] = {"round": rounds}
-            node_ids = sorted(list(self._history[-1].get("beliefs", {}).keys()))
+            last_map = self._history[-1].get("scores", self._history[-1].get("beliefs", {}))
+            node_ids = sorted(list(last_map.keys()))
             for nid in node_ids:
-                data[str(nid)] = [float(h.get("beliefs", {}).get(nid, float("nan"))) for h in self._history]
+                data[str(nid)] = [float((h.get("scores", h.get("beliefs", {}))).get(nid, float("nan"))) for h in self._history]
             pd.DataFrame(data).to_csv(beliefs_csv, index=False)
         if conversations_jsonl:
             with open(conversations_jsonl, "w", encoding="utf-8") as f:
@@ -381,6 +546,8 @@ def network(*, information: str, config: Optional[Dict[str, Any]] = None, config
         return Network(
             information=information,
             n=int(cfg["n"]),
+            metric_name=str(cfg.get("metric_name", DEFAULTS["metric_name"])),
+            metric_prompt=str(cfg.get("metric_prompt", DEFAULTS["metric_prompt"])),
             degree=int(cfg["edge_mean_degree"]),
             rounds=int(cfg["rounds"]),
             depth=float(cfg.get("depth", cfg.get("convo_depth_p", DEFAULTS["depth"]))),

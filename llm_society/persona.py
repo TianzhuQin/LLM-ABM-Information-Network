@@ -116,7 +116,7 @@ def sample_personas(n: int, segments: Optional[List[Dict]] = None) -> List[Perso
             counts[idx] += 1
 
     pid = 0
-    for seg, cnt in zip(segments, counts):
+    for seg_idx, (seg, cnt) in enumerate(zip(segments, counts)):
         traits = seg.get("traits", {}) or {}
         for _ in range(int(cnt)):
             gender = _sample_from_spec(traits.get("gender", {"choices": {"Man": 0.49, "Woman": 0.49, "Nonbinary": 0.02}}))
@@ -152,6 +152,13 @@ def sample_personas(n: int, segments: Optional[List[Dict]] = None) -> List[Perso
             extra = {}
             for k in extra_keys:
                 extra[k] = _sample_from_spec(traits[k])
+            # annotate segment index and optional custom segment name for downstream grouping
+            extra["_segment_index"] = int(seg_idx)
+            if "name" in seg and seg["name"] is not None:
+                try:
+                    extra["_segment_name"] = str(seg["name"])
+                except Exception:
+                    extra["_segment_name"] = str(seg_idx)
             people.append(Persona(pid, str(gender), str(race), int(age), str(religion), str(political), extra=extra or None))
             pid += 1
 
@@ -163,9 +170,43 @@ def sample_personas(n: int, segments: Optional[List[Dict]] = None) -> List[Perso
         age = int(_sample_from_spec(traits.get("age", {"uniform": [18, 65]})))
         religion = _sample_from_spec(traits.get("religion", "Unreligious"))
         political = _sample_from_spec(traits.get("political", "Democrat"))
-        people.append(Persona(pid, str(gender), str(race), int(age), str(religion), str(political), extra=None))
+        # pad from first segment; mark segment_index=0
+        people.append(Persona(pid, str(gender), str(race), int(age), str(religion), str(political), extra={"_segment_index": 0}))
         pid += 1
 
+    return people
+
+
+def personas_from_graph(G: "Any") -> List[Persona]:
+    """Build personas directly from a networkx.Graph's node attributes.
+    Expected keys (optional): gender, race, age, religion, political.
+    Any other keys are placed into extra.
+    """
+    people: List[Persona] = []
+    try:
+        nodes = list(G.nodes())
+    except Exception:
+        raise TypeError("G must be a networkx.Graph-like object with .nodes()")
+    # Try to preserve integer ordering if present
+    try:
+        nodes = sorted(nodes)
+    except Exception:
+        pass
+    for pid, node in enumerate(nodes):
+        try:
+            attrs = dict(G.nodes[node])
+        except Exception:
+            attrs = {}
+        gender = str(attrs.pop("gender", "Unknown"))
+        race = str(attrs.pop("race", "Unknown"))
+        try:
+            age = int(attrs.pop("age", 35))
+        except Exception:
+            age = 35
+        religion = str(attrs.pop("religion", "Unreligious"))
+        political = str(attrs.pop("political", "Unknown"))
+        extra = attrs or None
+        people.append(Persona(pid, gender, race, age, religion, political, extra=extra))
     return people
 
 
