@@ -51,7 +51,7 @@ def llm_belief_updates(model: str, information_text: str, prior_i: float, prior_
         return float(np.clip(prior_i, 0.0, 1.0)), float(np.clip(prior_j, 0.0, 1.0))
 
 
-def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, information_text: str, depth_intensity: float, talk_about_information: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int) -> Tuple[float, float, List[str], bool]:
+def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, information_text: str, depth_intensity: float, talk_about_information: bool, prior_belief_i: float, prior_belief_j: float, tie_weight: float, max_turns: int, *, extra_system_i: str = "", extra_system_j: str = "") -> Tuple[float, float, List[str], bool]:
     client = build_client()
     # Map intensity [0,1] -> geometric parameter p in (0,1]
     # Lower p -> longer expected conversation; intensity=0 -> very shallow (p≈1)
@@ -76,6 +76,10 @@ def llm_conversation_and_beliefs(model: str, p_i: Persona, p_j: Persona, informa
     else:
         sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}."
         sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}."
+    if extra_system_i:
+        sys_i = f"{sys_i} Intervention instruction: {extra_system_i}"
+    if extra_system_j:
+        sys_j = f"{sys_j} Intervention instruction: {extra_system_j}"
 
     if talk_about_information:
         last = f"Let's talk about this claim: {information_text}"
@@ -114,7 +118,15 @@ def llm_societal_summary(model: str, information_text: str, beliefs: List[float]
 
 def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     model = cfg["model"]
-    n = int(cfg["n"])
+    # If a custom graph is provided, prefer its size for n
+    custom_G = cfg.get("G", None)
+    if custom_G is not None:
+        try:
+            n = int(custom_G.number_of_nodes())
+        except Exception:
+            n = int(cfg["n"])
+    else:
+        n = int(cfg["n"])
     mean_deg = int(cfg["edge_mean_degree"])
     rounds = int(cfg["rounds"])
     depth_intensity = float(cfg.get("depth", cfg.get("convo_depth_p", DEFAULTS["depth"])))
@@ -134,6 +146,10 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     print_updates = bool(cfg.get("print_belief_updates", True))
     print_rounds = bool(cfg.get("print_round_summaries", True))
     print_all_convos = bool(cfg.get("print_all_conversations", True))
+    # interventions (LLM mode)
+    intervention_round = cfg.get("intervention_round", None)
+    intervention_nodes = set(cfg.get("intervention_nodes", []))
+    intervention_content = str(cfg.get("intervention_content", "")).strip()
 
     random.seed(rng_seed)
     np.random.seed(rng_seed)
@@ -143,7 +159,26 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
         os.environ["OPENAI_API_KEY_FILE"] = api_key_file
 
     personas = sample_personas(n, segments)
-    G = build_random_network(n, mean_deg, seed=rng_seed + 7)
+    # Build or adopt graph
+    if custom_G is not None:
+        try:
+            import networkx as nx  # local import
+            G = custom_G.copy()
+            # Relabel nodes to 0..n-1 if needed
+            nodes = list(G.nodes())
+            if len(nodes) != n or set(nodes) != set(range(n)):
+                mapping = {old: i for i, old in enumerate(nodes)}
+                G = nx.relabel_nodes(G, mapping, copy=True)
+                n = G.number_of_nodes()
+            # Ensure weights
+            for u, v in G.edges():
+                if "weight" not in G[u][v]:
+                    G[u][v]["weight"] = float(0.2 + 0.8 * np.random.beta(2, 2))
+        except Exception:
+            # Fallback to random if custom graph invalid
+            G = build_random_network(n, mean_deg, seed=rng_seed + 7)
+    else:
+        G = build_random_network(n, mean_deg, seed=rng_seed + 7)
 
     beliefs = {i: (seed_belief if i in set(seed_nodes) else 0.0) for i in range(n)}
     exposed = {i: (i in set(seed_nodes)) for i in range(n)}
@@ -166,16 +201,27 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
         edges = list(G.edges(data=True))
         for t in range(1, rounds + 1):
             prev_beliefs = beliefs.copy()
+            convos_for_round: List[Dict[str, Any]] = []
             rnd = edges.copy()
             random.shuffle(rnd)
             k = max(1, int(len(rnd) * edge_sample_frac))
             rnd = rnd[:k]
             for u, v, data in rnd:
                 w = float(data.get("weight", 0.5))
+                # intervention no longer affects talk probability; use discuss_prob
+                if intervention_round is not None:
+                    try:
+                        int_round = int(intervention_round)  # tolerate strings
+                    except Exception:
+                        int_round = None
+                else:
+                    int_round = None
                 talk_flag = (np.random.random() <= discuss_prob)
                 prev_u, prev_v = beliefs[u], beliefs[v]
+                extra_i = intervention_content if (intervention_round is not None and int_round is not None and t >= int_round and u in intervention_nodes and intervention_content) else ""
+                extra_j = intervention_content if (intervention_round is not None and int_round is not None and t >= int_round and v in intervention_nodes and intervention_content) else ""
                 b_i, b_j, turns, did_talk = llm_conversation_and_beliefs(
-                    model, personas[u], personas[v], information_text, depth_intensity, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4))
+                    model, personas[u], personas[v], information_text, depth_intensity, talk_flag, prev_u, prev_v, w, int(cfg.get("max_convo_turns", 4)), extra_system_i=extra_i, extra_system_j=extra_j
                 )
                 if print_convos and (print_all_convos or did_talk):
                     print(f"\n=== Conversation {u} <-> {v} ===")
@@ -198,13 +244,39 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
                             print(
                                 f"Belief update {u}<->{v}: {u} {prev_u} -> {beliefs[u]}, {v} {prev_v} -> {beliefs[v]}"
                             )
+                # record conversation (or non-conversation) for this edge
+                try:
+                    convos_for_round.append({
+                        "u": int(u),
+                        "v": int(v),
+                        "did_talk": bool(did_talk),
+                        "turns": list(turns),
+                    })
+                except Exception:
+                    convos_for_round.append({
+                        "u": int(u),
+                        "v": int(v),
+                        "did_talk": bool(did_talk),
+                        "turns": [str(x) for x in turns],
+                    })
             cov = {i for i in range(n) if exposed[i] and beliefs[i] > 0}
             arr_t = [beliefs[i] for i in range(n)]
             sum_t = llm_societal_summary(model, information_text, arr_t)
             if print_rounds:
                 print(f"Round {t}: {len(cov)}/{n} exposed/believing > 0")
                 print(f"Round {t} summary: {sum_t}")
-            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t}
+            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t, "conversations": convos_for_round}
+            if intervention_round is not None:
+                try:
+                    int_round = int(intervention_round)
+                except Exception:
+                    int_round = None
+                history_entry["intervention_active"] = (int_round is not None and t >= int_round)
+                history_entry["intervention_round"] = int_round
+                if intervention_nodes:
+                    history_entry["intervention_nodes"] = set(intervention_nodes)
+                if intervention_content:
+                    history_entry["intervention_content"] = intervention_content
             yield {
                 "t": t,
                 "G": G,
@@ -240,8 +312,7 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
             cov = {i for i in range(n) if exposed[i] and beliefs[i] > 0}
             arr_t = [beliefs[i] for i in range(n)]
             sum_t = ""
-            history_entry = {"round": t, "coverage": cov, "belie
-fs": beliefs.copy(), "summary": sum_t}
+            history_entry = {"round": t, "coverage": cov, "beliefs": beliefs.copy(), "summary": sum_t, "conversations": []}
             yield {
                 "t": t,
                 "G": G,

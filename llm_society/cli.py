@@ -41,6 +41,10 @@ def main() -> None:
     p.add_argument("--rng", type=int, help="Random seed", default=None)
     p.add_argument("--api-key-file", type=str, help="Path to API key file", default=None)
     p.add_argument("--model", type=str, help="Model name for LLM calls", default=None)
+    # Interventions
+    p.add_argument("--intervention-round", type=int, help="Round at which to start intervention (inject content for selected nodes)", default=None)
+    p.add_argument("--intervention-nodes", type=str, help="Comma-separated node ids to apply intervention to", default=None)
+    p.add_argument("--intervention-content", type=str, help="Intervention content prompt to inject into targeted agents' system messages", default=None)
 
     args = p.parse_args()
 
@@ -90,6 +94,12 @@ def main() -> None:
         cfg["api_key_file"] = str(args.api_key_file)
     if args.model is not None:
         cfg["model"] = str(args.model)
+    if args.intervention_round is not None:
+        cfg["intervention_round"] = int(args.intervention_round)
+    if args.intervention_nodes is not None:
+        cfg["intervention_nodes"] = _parse_seeds(args.intervention_nodes)
+    if args.intervention_content is not None:
+        cfg["intervention_content"] = str(args.intervention_content)
 
     # Validate required information
     if not str(cfg.get("information_text", "")).strip():

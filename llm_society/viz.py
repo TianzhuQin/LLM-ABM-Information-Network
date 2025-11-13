@@ -155,3 +155,130 @@ def save_animation(ani: animation.FuncAnimation, filename: str, fps: int = 2, dp
     return
 
 
+def plot_group_beliefs_over_time(history: List[Dict], personas: List, attr: str = "political", groups: Optional[List[str]] = None, figsize=(7, 3)) -> None:
+    """Plot mean belief over time for groups defined by a Persona attribute (e.g., 'political').
+
+    - history: list of round dictionaries with 'beliefs'
+    - personas: list of Persona objects (must have attribute 'attr' or key in extra)
+    - attr: attribute name on Persona (falls back to extra dict if missing)
+    - groups: optional explicit group order/filter; otherwise inferred from personas
+    """
+    # Collect group membership
+    def get_group(p):
+        val = getattr(p, attr, None)
+        if val is None and getattr(p, "extra", None):
+            val = p.extra.get(attr, None)
+        return str(val) if val is not None else "Unknown"
+
+    all_groups = [get_group(p) for p in personas]
+    uniq = sorted(list(dict.fromkeys(all_groups)))
+    if groups is not None:
+        uniq = [g for g in groups if g in set(all_groups)]
+    group_to_indices: Dict[str, List[int]] = {g: [] for g in uniq}
+    for i, g in enumerate(all_groups):
+        if g in group_to_indices:
+            group_to_indices[g].append(i)
+
+    rounds = list(range(len(history)))
+    plt.figure(figsize=figsize)
+    for g, idxs in group_to_indices.items():
+        if not idxs:
+            continue
+        ys = []
+        for h in history:
+            beliefs = h.get("beliefs", {})
+            vals = [float(beliefs.get(i, np.nan)) for i in idxs]
+            ys.append(float(np.nanmean(vals)) if len(vals) else np.nan)
+        plt.plot(rounds, ys, marker="o", label=str(g))
+    plt.xlabel("Round")
+    plt.ylabel("Mean belief (0-1)")
+    plt.ylim(0, 1)
+    plt.title(f"Group mean beliefs by '{attr}'")
+    plt.grid(alpha=0.3)
+    plt.legend(title=attr, bbox_to_anchor=(1.02, 1), loc="upper left")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_centrality_vs_belief_exposure(G: nx.Graph, history: List[Dict], metric: str = "degree", jitter: float = 0.02, figsize=(8, 3)) -> None:
+    """Scatter plots: centrality vs final belief, and centrality vs exposure (0/1).
+
+    metric: 'degree' | 'betweenness' | 'eigenvector'
+    """
+    final = history[-1]
+    beliefs = final.get("beliefs", {})
+    coverage = set(final.get("coverage", set()))
+
+    # Centrality
+    if metric == "degree":
+        cent = nx.degree_centrality(G)
+    elif metric == "betweenness":
+        cent = nx.betweenness_centrality(G)
+    elif metric == "eigenvector":
+        try:
+            cent = nx.eigenvector_centrality(G, max_iter=1000)
+        except Exception:
+            cent = nx.katz_centrality_numpy(G)  # fallback to a spectral centrality
+    else:
+        raise ValueError("Unknown metric. Use 'degree', 'betweenness', or 'eigenvector'.")
+
+    xs = []
+    ys_belief = []
+    ys_exp = []
+    for i in G.nodes():
+        xs.append(float(cent.get(i, 0.0)))
+        ys_belief.append(float(beliefs.get(i, 0.0)))
+        ys_exp.append(1.0 if i in coverage else 0.0)
+
+    fig, ax = plt.subplots(1, 2, figsize=figsize)
+    ax[0].scatter(xs, ys_belief, s=20, alpha=0.7)
+    ax[0].set_xlabel(f"{metric} centrality")
+    ax[0].set_ylabel("Final belief")
+    ax[0].set_title("Centrality vs Belief")
+    ax[0].grid(alpha=0.3)
+
+    # Small jitter for exposure for visibility
+    ys_exp_jitter = np.array(ys_exp) + np.random.uniform(-jitter, jitter, size=len(ys_exp))
+    ax[1].scatter(xs, ys_exp_jitter, s=20, alpha=0.7, color="crimson")
+    ax[1].set_xlabel(f"{metric} centrality")
+    ax[1].set_ylabel("Exposure (0/1)")
+    ax[1].set_title("Centrality vs Exposure")
+    ax[1].set_yticks([0, 1])
+    ax[1].grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_intervention_effect(history: List[Dict], intervention_round: Optional[int] = None, figsize=(6, 3)) -> None:
+    """Plot coverage with a vertical line at the intervention round and annotate pre/post slopes."""
+    cov = [len(h.get("coverage", set())) for h in history]
+    rounds = list(range(len(history)))
+
+    def slope(x, y):
+        if len(x) < 2:
+            return np.nan
+        x_arr = np.array(x, dtype=float)
+        y_arr = np.array(y, dtype=float)
+        A = np.vstack([x_arr, np.ones_like(x_arr)]).T
+        m, _b = np.linalg.lstsq(A, y_arr, rcond=None)[0]
+        return float(m)
+
+    plt.figure(figsize=figsize)
+    plt.plot(rounds, cov, marker="o", label="coverage")
+    if intervention_round is not None and 0 <= intervention_round < len(history):
+        plt.axvline(intervention_round, color="red", linestyle="--", label=f"intervention at t={intervention_round}")
+        pre_x = list(range(0, intervention_round + 1))
+        post_x = list(range(intervention_round, len(history)))
+        pre_s = slope(pre_x, cov[: len(pre_x)])
+        post_s = slope(post_x, cov[intervention_round :])
+        plt.text(intervention_round + 0.1, max(cov) * 0.2, f"pre-slope≈{pre_s:.2f}\npost-slope≈{post_s:.2f}", color="red")
+    plt.xlabel("Round")
+    plt.ylabel("# nodes exposed & believing > 0")
+    plt.title("Intervention effect on coverage")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+

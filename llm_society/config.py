@@ -34,6 +34,11 @@ DEFAULTS: Dict[str, Any] = {
     "rng_seed": 0,
     "api_key_file": "api-key.txt",
     "persona_segments": [],
+    # intervention controls (for LLM mode)
+    "intervention_round": None,  # int or None
+    "intervention_nodes": [],  # list of node ids
+    # intervention content prompt to inject into targeted agents' system messages from intervention_round onward
+    "intervention_content": "",
     "casual_topics": [
         "weekend plans",
         "favorite foods",
