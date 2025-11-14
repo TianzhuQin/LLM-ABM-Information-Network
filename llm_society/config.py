@@ -1,6 +1,7 @@
 import os
 import json
-from typing import Any, Dict, Union
+import re
+from typing import Any, Dict, Union, List
 
 
 def _as_bool(val: Any, default: bool) -> bool:
@@ -15,11 +16,21 @@ def _as_bool(val: Any, default: bool) -> bool:
     return default
 
 
+def _slugify_metric_id(raw: str, fallback: str = "metric") -> str:
+    base = str(raw or "").strip().lower()
+    if not base:
+        base = fallback
+    slug = re.sub(r"[^a-z0-9]+", "_", base).strip("_")
+    return slug or fallback
+
+
 DEFAULTS: Dict[str, Any] = {
     "model": "gpt-4.1",
     "n": 20,
     "edge_mean_degree": 4,
     "rounds": 10,
+    "conversation_scope": "edges",  # 'edges' | 'all_pairs'
+    "pair_weight_epsilon": 0.01,
     # Metric settings
     # Default metric is "credibility" scored as a probability in [0,1]
     "metric_name": "credibility",
@@ -29,12 +40,13 @@ DEFAULTS: Dict[str, Any] = {
     ),
     "depth": 0.6,  # 0-1 intensity: 0=very shallow, 1=very deep
     "max_convo_turns": 4,
+    "memory_turns_per_agent": 0,
     "edge_sample_frac": 0.5,
     "seed_nodes": [0, 1],
-    "seed_belief": 0.98,  # legacy name
-    "seed_score": 0.98,   # preferred name
-    "information_text": "5G towers cause illness.",
+    "seed_score": 0.98,
+    "information": "5G towers cause illness.",
     "talk_information_prob": 0.25,
+    "metrics": None,
     "contagion_mode": "llm",  # 'llm' | 'simple' | 'complex'
     "complex_threshold_k": 2,
     "stop_when_stable": False,
@@ -47,22 +59,34 @@ DEFAULTS: Dict[str, Any] = {
     "intervention_nodes": [],  # list of node ids
     # intervention content prompt to inject into targeted agents' system messages from intervention_round onward
     "intervention_content": "",
-    "casual_topics": [
-        "weekend plans",
-        "favorite foods",
-        "movies or TV shows",
-        "music you enjoy",
-        "travel dreams",
-        "recent hobbies",
-        "sports",
-        "weather today",
-    ],
     # printing controls
     "print_conversations": True,
-    "print_belief_updates": True,
+    "print_score_updates": True,
     "print_round_summaries": True,
     "print_all_conversations": True,
 }
+
+def normalize_metrics(raw_metrics: Any, default_name: str, default_prompt: str) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    if isinstance(raw_metrics, list):
+        for idx, entry in enumerate(raw_metrics):
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("label", entry.get("name", default_name))).strip() or default_name
+            prompt = str(entry.get("prompt", default_prompt))
+            m_id = _slugify_metric_id(entry.get("id") or label or f"metric_{idx}", fallback=f"metric_{idx}")
+            normalized.append({
+                "id": m_id,
+                "label": label,
+                "prompt": prompt,
+            })
+    if not normalized:
+        normalized = [{
+            "id": _slugify_metric_id(default_name, "metric"),
+            "label": default_name,
+            "prompt": default_prompt,
+        }]
+    return normalized
 
 
 def load_config(source: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
@@ -119,20 +143,31 @@ def load_config(source: Union[str, Dict[str, Any], None]) -> Dict[str, Any]:
 
     # Normalize certain types/keys
     merged["contagion_mode"] = str(merged.get("contagion_mode", "llm")).lower()
+    merged["conversation_scope"] = str(merged.get("conversation_scope", DEFAULTS["conversation_scope"])).lower()
+    try:
+        merged["pair_weight_epsilon"] = max(0.0, float(merged.get("pair_weight_epsilon", DEFAULTS["pair_weight_epsilon"])))
+    except Exception:
+        merged["pair_weight_epsilon"] = float(DEFAULTS["pair_weight_epsilon"])
     merged["stop_when_stable"] = _as_bool(merged.get("stop_when_stable"), DEFAULTS["stop_when_stable"]) 
     # seed nodes: accept comma-separated string
     seeds = merged.get("seed_nodes")
     if isinstance(seeds, str):
         merged["seed_nodes"] = [int(x) for x in seeds.split(",") if x.strip() != ""]
-    # normalize seed score key (prefer 'seed_score', accept legacy 'seed_belief')
     if "seed_score" not in merged:
-        if "seed_belief" in merged:
-            try:
-                merged["seed_score"] = float(merged["seed_belief"])  # type: ignore[arg-type]
-            except Exception:
-                merged["seed_score"] = float(DEFAULTS["seed_score"])
-        else:
-            merged["seed_score"] = float(DEFAULTS["seed_score"])
+        merged["seed_score"] = float(DEFAULTS["seed_score"])
+    try:
+        merged["memory_turns_per_agent"] = max(0, int(merged.get("memory_turns_per_agent", DEFAULTS["memory_turns_per_agent"])))
+    except Exception:
+        merged["memory_turns_per_agent"] = int(DEFAULTS["memory_turns_per_agent"])
+    if "print_score_updates" not in merged:
+        merged["print_score_updates"] = _as_bool(merged.get("print_score_updates"), DEFAULTS["print_score_updates"])
+    merged["metrics"] = normalize_metrics(
+        merged.get("metrics"),
+        str(merged.get("metric_name", DEFAULTS["metric_name"])),
+        str(merged.get("metric_prompt", DEFAULTS["metric_prompt"])),
+    )
+    merged["metric_name"] = str(merged["metrics"][0]["label"])
+    merged["metric_prompt"] = str(merged["metrics"][0]["prompt"])
     return merged
 
 

@@ -31,8 +31,10 @@ def main() -> None:
     p.add_argument("--depth", type=float, help="Conversation depth intensity [0-1]", default=None)
     p.add_argument("--depth-max", type=int, help="Max conversation turns per pair", default=None)
     p.add_argument("--edge-frac", type=float, help="Fraction of edges sampled per round", default=None)
+    p.add_argument("--conversation-scope", type=str, choices=["edges", "all_pairs"], help="Conversation sampling scope for LLM mode", default=None)
+    p.add_argument("--pair-weight-epsilon", type=float, help="Minimum tie weight used when sampling all node pairs", default=None)
     p.add_argument("--seeds", type=str, help="Comma-separated seed node ids, e.g. 0,1,2", default=None)
-    p.add_argument("--seed-belief", type=float, help="Initial belief for seed nodes [0-1]", default=None)
+    p.add_argument("--seed-score", type=float, help="Initial score for seed nodes [0-1]", default=None)
     p.add_argument("--talk-prob", type=float, help="Probability a sampled edge talks about the information [0-1]", default=None)
     p.add_argument("--mode", type=str, help="Contagion mode: llm|simple|complex", default=None)
     p.add_argument("--complex-k", type=int, help="Threshold k for complex contagion", default=None)
@@ -45,6 +47,7 @@ def main() -> None:
     p.add_argument("--intervention-round", type=int, help="Round at which to start intervention (inject content for selected nodes)", default=None)
     p.add_argument("--intervention-nodes", type=str, help="Comma-separated node ids to apply intervention to", default=None)
     p.add_argument("--intervention-content", type=str, help="Intervention content prompt to inject into targeted agents' system messages", default=None)
+    p.add_argument("--memory-turns-per-agent", type=int, help="How many recent utterances each agent remembers in their system prompt (LLM mode)", default=None)
 
     args = p.parse_args()
 
@@ -74,10 +77,14 @@ def main() -> None:
         cfg["max_convo_turns"] = int(args.depth_max)
     if args.edge_frac is not None:
         cfg["edge_sample_frac"] = float(args.edge_frac)
+    if args.conversation_scope is not None:
+        cfg["conversation_scope"] = str(args.conversation_scope)
+    if args.pair_weight_epsilon is not None:
+        cfg["pair_weight_epsilon"] = float(args.pair_weight_epsilon)
     if args.seeds is not None:
         cfg["seed_nodes"] = _parse_seeds(args.seeds)
-    if args.seed_belief is not None:
-        cfg["seed_belief"] = float(args.seed_belief)
+    if args.seed_score is not None:
+        cfg["seed_score"] = float(args.seed_score)
     if args.talk_prob is not None:
         cfg["talk_information_prob"] = float(args.talk_prob)
     if args.mode is not None:
@@ -100,6 +107,8 @@ def main() -> None:
         cfg["intervention_nodes"] = _parse_seeds(args.intervention_nodes)
     if args.intervention_content is not None:
         cfg["intervention_content"] = str(args.intervention_content)
+    if args.memory_turns_per_agent is not None:
+        cfg["memory_turns_per_agent"] = int(max(0, args.memory_turns_per_agent))
 
     # Validate required information
     if not str(cfg.get("information_text", "")).strip():

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from .config import DEFAULTS, load_config
+from .config import DEFAULTS, load_config, normalize_metrics
 from .simulation import run_simulation, iterate_simulation
+from .dashboard import build_dashboard, render_dashboard_html
 from . import viz
 import networkx as nx
 import json
@@ -17,7 +18,14 @@ class NodeProxy:
     def plot(self) -> None:
         if self._net._history is None:
             raise RuntimeError("Call simulate() before plotting node trajectories.")
-        viz.plot_belief_trajectories(self._net._history, [self.id], metric_label=self._net.metric_name.capitalize())
+        default_metric = self._net.metric_ids[0] if self._net.metric_ids else None
+        default_label = str(self._net.metrics[0].get("label", self._net.metric_name)) if self._net.metrics else self._net.metric_name
+        viz.plot_score_trajectories(
+            self._net._history,
+            [self.id],
+            metric_label=str(default_label),
+            metric_id=default_metric,
+        )
 
 
 class Network:
@@ -33,8 +41,10 @@ class Network:
         depth: float = DEFAULTS["depth"],
         depth_max: int = DEFAULTS["max_convo_turns"],
         edge_frac: float = DEFAULTS["edge_sample_frac"],
+        conversation_scope: str = DEFAULTS["conversation_scope"],
+        pair_weight_epsilon: float = DEFAULTS["pair_weight_epsilon"],
         seeds: Optional[List[int]] = None,
-        seed_belief: float = DEFAULTS["seed_belief"],
+        seed_score: float = DEFAULTS["seed_score"],
         talk_prob: float = DEFAULTS["talk_information_prob"],
         mode: str = DEFAULTS["contagion_mode"],
         complex_k: int = DEFAULTS["complex_threshold_k"],
@@ -45,17 +55,22 @@ class Network:
         segments: Optional[List[Dict[str, Any]]] = None,
         model: str = DEFAULTS["model"],
         print_conversations: bool = DEFAULTS["print_conversations"],
-        print_belief_updates: bool = DEFAULTS["print_belief_updates"],
+        print_score_updates: bool = DEFAULTS["print_score_updates"],
         print_round_summaries: bool = DEFAULTS["print_round_summaries"],
         print_all_conversations: bool = DEFAULTS["print_all_conversations"],
         intervention_round: Optional[int] = DEFAULTS.get("intervention_round", None),
         intervention_nodes: Optional[List[int]] = None,
         intervention_content: str = DEFAULTS.get("intervention_content", ""),
         graph: Optional[nx.Graph] = None,
+        memory_turns_per_agent: int = DEFAULTS.get("memory_turns_per_agent", 0),
+        metrics: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        if not isinstance(information, str) or information.strip() == "":
-            raise ValueError("'information' must be a non-empty string.")
-        self.information = information.strip()
+        if not isinstance(information, str):
+            raise ValueError("'information' must be a string.")
+        info_clean = information.strip()
+        if info_clean == "" and intervention_round is None:
+            raise ValueError("'information' must be provided unless an intervention is configured.")
+        self.information = info_clean
 
         # If a custom graph is provided, override n from graph
         self._custom_graph = graph
@@ -68,8 +83,10 @@ class Network:
         self.depth = int(depth_max)
         self.depth_intensity = float(max(0.0, min(1.0, depth)))
         self.edge_frac = float(edge_frac)
+        self.conversation_scope = str(conversation_scope).lower()
+        self.pair_weight_epsilon = float(max(0.0, pair_weight_epsilon))
         self.seeds = list(seeds) if seeds is not None else list(DEFAULTS["seed_nodes"])  # copy
-        self.seed_belief = float(seed_belief)
+        self.seed_score = float(seed_score)
         self.talk_prob = float(talk_prob)
         self.mode = str(mode)
         self.complex_k = int(complex_k)
@@ -80,16 +97,24 @@ class Network:
         self.segments = list(segments) if segments is not None else []
         self.model = str(model)
         self.print_conversations = bool(print_conversations)
-        self.print_belief_updates = bool(print_belief_updates)
+        self.print_score_updates = bool(print_score_updates)
         self.print_round_summaries = bool(print_round_summaries)
         self.print_all_conversations = bool(print_all_conversations)
         self.intervention_round = intervention_round
         self.intervention_nodes = list(intervention_nodes) if intervention_nodes is not None else []
         self.intervention_content = str(intervention_content or "")
+        self.memory_turns_per_agent = int(max(0, memory_turns_per_agent))
+        raw_metrics = metrics if metrics is not None else DEFAULTS.get("metrics")
+        self.metrics = normalize_metrics(raw_metrics, self.metric_name, self.metric_prompt)
+        primary_metric = self.metrics[0]
+        self.metric_name = str(primary_metric.get("label", self.metric_name))
+        self.metric_prompt = str(primary_metric.get("prompt", self.metric_prompt))
+        self.metric_ids = [str(m.get("id")) for m in self.metrics]
 
         self._result: Optional[Dict[str, Any]] = None
         self._history: Optional[List[Dict[str, Any]]] = None
         self._scores: Optional[Dict[int, float]] = None
+        self._scores_multi: Optional[Dict[str, Dict[int, float]]] = None
         self._G = None
         self._personas: Optional[List[Any]] = None
         self.nodes: List[NodeProxy] = []
@@ -105,9 +130,11 @@ class Network:
             "depth": self.depth_intensity,
             "max_convo_turns": self.depth,
             "edge_sample_frac": self.edge_frac,
+            "conversation_scope": self.conversation_scope,
+            "pair_weight_epsilon": self.pair_weight_epsilon,
             "seed_nodes": list(self.seeds),
-            "seed_belief": self.seed_belief,
-            "information_text": self.information,
+            "seed_score": self.seed_score,
+            "information": self.information,
             "talk_information_prob": self.talk_prob,
             "contagion_mode": self.mode,
             "complex_threshold_k": self.complex_k,
@@ -117,20 +144,52 @@ class Network:
             "api_key_file": self.api_key_file,
             "persona_segments": list(self.segments),
             "print_conversations": self.print_conversations,
-            "print_belief_updates": self.print_belief_updates,
+            "print_score_updates": self.print_score_updates,
             "print_round_summaries": self.print_round_summaries,
             "print_all_conversations": self.print_all_conversations,
             "intervention_round": self.intervention_round,
             "intervention_nodes": list(self.intervention_nodes),
             "intervention_content": self.intervention_content,
             "G": self._custom_graph,
+            "memory_turns_per_agent": self.memory_turns_per_agent,
+            "metrics": self.metrics,
         }
+
+    def _resolve_metric_choice(self, metric_spec: Optional[str]) -> Tuple[str, str]:
+        metrics = self.metrics if self.metrics else [{"id": "metric", "label": self.metric_name}]
+        if metric_spec is None:
+            chosen = metrics[0]
+        else:
+            spec = str(metric_spec).strip().lower()
+            chosen = None
+            for m in metrics:
+                mid = str(m.get("id"))
+                label = str(m.get("label", mid))
+                if spec == mid.lower() or spec == label.lower():
+                    chosen = m
+                    break
+            if chosen is None:
+                valid = ", ".join(str(m.get("id")) for m in metrics)
+                raise ValueError(f"Unknown metric '{metric_spec}'. Available metric ids: {valid}")
+        metric_id = str(chosen.get("id"))
+        label = str(chosen.get("label", metric_id))
+        return metric_id, label
+
+    def _scores_for_metric(self, metric_id: Optional[str]) -> Dict[int, float]:
+        if metric_id and self._scores_multi and metric_id in self._scores_multi:
+            return self._scores_multi[metric_id]
+        if metric_id in (None, self.metric_ids[0] if self.metric_ids else None):
+            if self._scores is None:
+                raise RuntimeError("Call simulate() before accessing scores.")
+            return self._scores
+        raise ValueError(f"No scores recorded for metric '{metric_id}'. Run simulate() first or verify metric id.")
 
     def simulate(self) -> None:
         cfg = self._make_cfg()
         self._result = run_simulation(cfg)
         self._history = self._result["history"]
-        self._scores = self._result.get("scores", self._result.get("beliefs"))
+        self._scores = self._result.get("scores")
+        self._scores_multi = self._result.get("scores_multi")
         self._G = self._result["G"]
         self._personas = self._result["personas"]
         self.nodes = [NodeProxy(self, i) for i in range(self.n)]
@@ -148,8 +207,8 @@ class Network:
         except StopIteration:
             return False
         self._G = state["G"]
-        # prefer scores, fallback to beliefs for backward compatibility
-        self._scores = dict(state.get("scores", state.get("beliefs", {})))
+        self._scores = dict(state["scores"])
+        self._scores_multi = state.get("scores_multi")
         self._personas = state["personas"]
         if self._history is None:
             self._history = []
@@ -176,56 +235,49 @@ class Network:
         type:
           - "animation": animated network (default; save supports mp4/gif/html)
           - "coverage": coverage over time
-          - "final_beliefs": final belief heat map on the graph
-          - "group_beliefs": mean belief over time by persona attribute
+          - "final": final node scores heat map on the graph
+          - "group": mean score over time by persona attribute
               kwargs: attr="political", groups=[...]
-          - "centrality": centrality vs final belief/exposure scatter
+          - "centrality": centrality vs final score/exposure scatter
               kwargs: metric="degree"|"betweenness"|"eigenvector"
-          - "intervention_effect": coverage with intervention marker
+          - "intervention": coverage with intervention marker
               kwargs: intervention_round=int (optional; auto-detected if omitted)
 
-        Backward-compat:
-          - Accept legacy keyword 'plot_type' and map it to 'type' if provided.
-          - If the first arg historically looked like a filename and not a known type,
-            we treat it as 'save' and default to animation.
+        If the provided type looks like a filename (and `save` is None), we interpret it
+        as the `save` path and default to the animation plot.
         """
         if self._history is None or self._scores is None or self._G is None:
             raise RuntimeError("Call simulate() before plot().")
 
-        # Legacy support: allow plot_type kw to set 'type'
-        if "plot_type" in kwargs and isinstance(kwargs["plot_type"], str):
-            # only override if caller didn't explicitly pass a non-default 'type'
-            if type == "animation":
-                type = kwargs.pop("plot_type")
+        metric_spec = kwargs.pop("metric_id", None)
+        metric_spec = kwargs.pop("metric", metric_spec)
+        metric_id, metric_label = self._resolve_metric_choice(metric_spec)
+
+        requested_type = str(type).strip().lower()
+        allowed = {"animation", "coverage", "final", "group", "centrality", "intervention"}
+        if requested_type not in allowed:
+            if save is None:
+                save = str(type)
+                requested_type = "animation"
             else:
-                kwargs.pop("plot_type")
+                raise ValueError(f"Unknown type: {type}")
 
-        allowed = {"animation", "coverage", "final_scores", "final_beliefs", "group", "group_beliefs", "centrality", "intervention_effect"}
-        # Back-compat rescue: if first arg looks like a filename and not a known type
-        if type not in allowed and save is None:
-            # treat plot_type as 'save' and default to animation
-            save = str(type)
-            type = "animation"
-
-        if type == "animation":
-            ani = viz.show_animation(self._history, self._G, metric_label=self.metric_name.capitalize())
+        if requested_type == "animation":
+            ani = viz.show_animation(self._history, self._G, metric_label=str(metric_label), metric_id=metric_id)
             if save:
                 viz.save_animation(ani, save)
             return
 
-        if type == "coverage":
+        if requested_type == "coverage":
             viz.plot_coverage_over_time(self._history)
             return
 
-        if type == "final_beliefs":
-            # backward-compat: map to final_scores
-            type = "final_scores"
-        if type == "final_scores":
-            viz.plot_final_scores(self._G, self._scores, metric_label=self.metric_name.capitalize())
+        if requested_type == "final":
+            scores_map = self._scores_for_metric(metric_id)
+            viz.plot_final_scores(self._G, scores_map, metric_label=str(metric_label))
             return
 
-        if type in {"group", "group_beliefs"}:
-            # 'group' is preferred; 'group_beliefs' kept for backward-compat
+        if requested_type == "group":
             by = kwargs.get("by", "traits")  # 'traits' | 'segment'
             attr = kwargs.get("attr", "political")
             groups = kwargs.get("groups", None)
@@ -237,18 +289,26 @@ class Network:
                 attr=attr,
                 groups=groups,
                 segments=self.segments,
-                metric_label=self.metric_name.capitalize(),
+                metric_label=str(metric_label),
+                metric_id=metric_id,
                 by=by,
             )
             return
 
-        if type == "centrality":
+        if requested_type == "centrality":
             metric = kwargs.get("metric", "degree")
             show_exposure = kwargs.get("show_exposure", False)
-            viz.plot_centrality_vs_score_exposure(self._G, self._history, metric=metric, metric_label=self.metric_name.capitalize(), show_exposure=show_exposure)
+            viz.plot_centrality_vs_score_exposure(
+                self._G,
+                self._history,
+                metric=metric,
+                metric_label=str(metric_label),
+                show_exposure=show_exposure,
+                metric_id=metric_id,
+            )
             return
 
-        if type == "intervention_effect":
+        if requested_type == "intervention":
             # try to auto-detect intervention round from history metadata
             intervention_round = kwargs.get("intervention_round", None)
             if intervention_round is None:
@@ -264,7 +324,8 @@ class Network:
                 attr=attr,
                 groups=groups,
                 segments=self.segments,
-                metric_label=self.metric_name.capitalize(),
+                metric_label=str(metric_label),
+                metric_id=metric_id,
             )
             return
 
@@ -277,16 +338,16 @@ class Network:
         return self._history
 
     @property
-    def beliefs(self) -> Dict[int, float]:
-        if self._scores is None:
-            raise RuntimeError("Call simulate() first to populate beliefs.")
-        return self._scores
-
-    @property
     def scores(self) -> Dict[int, float]:
         if self._scores is None:
             raise RuntimeError("Call simulate() first to populate scores.")
         return self._scores
+
+    @property
+    def scores_multi(self) -> Dict[str, Dict[int, float]]:
+        if self._scores_multi is None:
+            raise RuntimeError("Call simulate() first to populate multi-metric scores.")
+        return self._scores_multi
 
     @property
     def graph(self):
@@ -328,7 +389,7 @@ class Network:
         n = self.n
         cov_series = [len(h.get("coverage", [])) for h in self._history]
         final_cov = cov_series[-1] if cov_series else 0
-        mean_belief = float(sum(self._scores.values()) / max(1, len(self._scores)))
+        mean_score = float(sum(self._scores.values()) / max(1, len(self._scores)))
         # t_50: first round where coverage >= 50% of n
         t_50 = None
         target = 0.5 * n
@@ -355,7 +416,7 @@ class Network:
         return {
             "rounds": len(self._history) - 1,
             "final_coverage": final_cov,
-            "mean_belief": mean_belief,
+            "mean_score": mean_score,
             "t_50": t_50,
             "polarization_gap_rep_minus_dem": pol_gap,
         }
@@ -387,7 +448,7 @@ class Network:
                 t_50 = int(h["round"])
                 break
 
-        # belief statistics
+        # score statistics
         b = np.array([float(self._scores.get(i, np.nan)) for i in sorted(self._scores.keys())], dtype=float)
         mean_b = float(np.nanmean(b)) if b.size else float("nan")
         med_b = float(np.nanmedian(b)) if b.size else float("nan")
@@ -407,10 +468,10 @@ class Network:
                 if key:
                     groups.setdefault(key, []).append(i)
             if groups.get("Democrat"):
-                dem = np.array([self._beliefs.get(i, np.nan) for i in groups["Democrat"]], dtype=float)
+                dem = np.array([self._scores.get(i, np.nan) for i in groups["Democrat"]], dtype=float)
                 pol["Democrat"] = float(np.nanmean(dem))
             if groups.get("Republican"):
-                rep = np.array([self._beliefs.get(i, np.nan) for i in groups["Republican"]], dtype=float)
+                rep = np.array([self._scores.get(i, np.nan) for i in groups["Republican"]], dtype=float)
                 pol["Republican"] = float(np.nanmean(rep))
             if np.isfinite(pol["Democrat"]) and np.isfinite(pol["Republican"]):
                 pol["gap_rep_minus_dem"] = float(pol["Republican"] - pol["Democrat"])
@@ -488,11 +549,11 @@ class Network:
         rows.append(line("═"))
         return "\n".join(rows)
 
-    def export(self, history_csv: Optional[str] = None, beliefs_csv: Optional[str] = None, conversations_jsonl: Optional[str] = None) -> None:
+    def export(self, history_csv: Optional[str] = None, scores_csv: Optional[str] = None, conversations_jsonl: Optional[str] = None) -> None:
         """Export results to files. CSV requires pandas."""
         if self._history is None or self._scores is None:
             raise RuntimeError("Call simulate() first.")
-        if history_csv or beliefs_csv:
+        if history_csv or scores_csv:
             import pandas as pd  # local import
         if history_csv:
             rows = []
@@ -503,14 +564,14 @@ class Network:
                     "summary": h.get("summary", ""),
                 })
             pd.DataFrame(rows).to_csv(history_csv, index=False)
-        if beliefs_csv:
+        if scores_csv:
             rounds = [h["round"] for h in self._history]
             data: Dict[str, Any] = {"round": rounds}
-            last_map = self._history[-1].get("scores", self._history[-1].get("beliefs", {}))
+            last_map = self._history[-1].get("scores", {})
             node_ids = sorted(list(last_map.keys()))
             for nid in node_ids:
-                data[str(nid)] = [float((h.get("scores", h.get("beliefs", {}))).get(nid, float("nan"))) for h in self._history]
-            pd.DataFrame(data).to_csv(beliefs_csv, index=False)
+                data[str(nid)] = [float((h.get("scores", {})).get(nid, float("nan"))) for h in self._history]
+            pd.DataFrame(data).to_csv(scores_csv, index=False)
         if conversations_jsonl:
             with open(conversations_jsonl, "w", encoding="utf-8") as f:
                 for h in self._history:
@@ -522,23 +583,56 @@ class Network:
                         except Exception:
                             f.write(str(out) + "\n")
 
+    def export_dashboard(
+        self,
+        path: str,
+        *,
+        engine: str = "plotly",
+        attr: Optional[str] = None,
+        groups: Optional[List[str]] = None,
+        metric: Optional[str] = None,
+    ) -> None:
+        """Deprecated; use dashboard()."""
+        engine, obj = self.dashboard(engine=engine, attr=attr, groups=groups, metric=metric)
+        html = render_dashboard_html(engine, obj)
+        with open(path, "w", encoding="utf-8") as fout:
+            fout.write(html)
 
-def network(*, information: str, config: Optional[Dict[str, Any]] = None, config_file: Optional[str] = None, **kwargs: Any) -> Network:
-    """Factory supporting three call styles:
-    - network(information=..., n=..., degree=..., ...)
-    - network(information=..., config={...})
-    - network(information=..., config_file="path.yaml")
+    def dashboard(
+        self,
+        *,
+        engine: str = "plotly",
+        attr: Optional[str] = None,
+        groups: Optional[List[str]] = None,
+        metric: Optional[str] = None,
+        to_html: bool = False,
+    ):
+        """Return an interactive dashboard object (Plotly figure or Bokeh layout).
 
-    'information' is required and must be a non-empty string.
-    """
-    if not isinstance(information, str) or information.strip() == "":
-        raise ValueError("'information' must be a non-empty string.")
+        Set `to_html=True` to get an HTML string ready for display in notebooks.
+        """
+        if self._history is None or self._scores is None:
+            raise RuntimeError("Call simulate() first.")
+        metric_id, metric_label = self._resolve_metric_choice(metric)
+        personas = getattr(self, "_personas", None)
+        engine_name, obj = build_dashboard(
+            history=self._history,
+            personas=personas,
+            metric_label=metric_label,
+            metric_id=metric_id,
+            engine=engine,
+            attr=attr,
+            groups=groups,
+        )
+        if to_html:
+            return render_dashboard_html(engine_name, obj)
+        return obj
 
-    # Back-compat: allow claim in kwargs but enforce non-empty
-    if "claim" in kwargs and not kwargs.get("information"):
-        claim_val = str(kwargs.pop("claim"))
-        if claim_val.strip() != "":
-            kwargs["information"] = claim_val
+
+def network(*, information: str = "", config: Optional[Dict[str, Any]] = None, config_file: Optional[str] = None, **kwargs: Any) -> Network:
+    """Factory supporting config dict/file or direct kwargs."""
+    if not isinstance(information, str):
+        raise ValueError("'information' must be a string.")
 
     if config_file is not None or config is not None:
         src = config_file if config_file is not None else config  # type: ignore
@@ -553,8 +647,10 @@ def network(*, information: str, config: Optional[Dict[str, Any]] = None, config
             depth=float(cfg.get("depth", cfg.get("convo_depth_p", DEFAULTS["depth"]))),
             depth_max=int(cfg["max_convo_turns"]),
             edge_frac=float(cfg["edge_sample_frac"]),
+            conversation_scope=str(cfg.get("conversation_scope", DEFAULTS["conversation_scope"])),
+            pair_weight_epsilon=float(cfg.get("pair_weight_epsilon", DEFAULTS["pair_weight_epsilon"])),
             seeds=list(cfg["seed_nodes"]),
-            seed_belief=float(cfg["seed_belief"]),
+            seed_score=float(cfg["seed_score"]),
             talk_prob=float(cfg.get("talk_information_prob", DEFAULTS["talk_information_prob"])),
             mode=str(cfg["contagion_mode"]),
             complex_k=int(cfg["complex_threshold_k"]),
@@ -565,13 +661,15 @@ def network(*, information: str, config: Optional[Dict[str, Any]] = None, config
             segments=list(cfg.get("persona_segments", [])),
             model=str(cfg["model"]),
             print_conversations=bool(cfg["print_conversations"]),
-            print_belief_updates=bool(cfg["print_belief_updates"]),
+            print_score_updates=bool(cfg["print_score_updates"]),
             print_round_summaries=bool(cfg["print_round_summaries"]),
             print_all_conversations=bool(cfg["print_all_conversations"]),
             intervention_round=cfg.get("intervention_round", DEFAULTS.get("intervention_round")),
             intervention_nodes=list(cfg.get("intervention_nodes", [])),
             intervention_content=str(cfg.get("intervention_content", DEFAULTS.get("intervention_content", ""))),
             graph=kwargs.get("graph", None),  # allow graph passed alongside config kwargs
+            memory_turns_per_agent=int(cfg.get("memory_turns_per_agent", DEFAULTS.get("memory_turns_per_agent", 0))),
+            metrics=list(cfg.get("metrics", DEFAULTS.get("metrics", []))),
         )
 
     # kwargs style

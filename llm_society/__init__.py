@@ -17,6 +17,7 @@ from .network import build_random_network  # noqa: F401
 from .llm import build_client  # noqa: F401
 from .simulation import run_simulation  # noqa: F401
 from . import viz  # noqa: F401
+from .dashboard import export_dashboard  # noqa: F401
 
 # OO API
 from .api import Network, network  # noqa: F401
