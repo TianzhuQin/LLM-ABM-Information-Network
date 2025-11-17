@@ -68,38 +68,39 @@ def plot_coverage_over_time(history: List[Dict]) -> None:
     plt.show()
 
 
-def plot_final_scores(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[int, np.ndarray]] = None, metric_label: str = "Belief") -> None:
-    belief_arr = np.array([scores[i] for i in G.nodes()])
+def plot_final_scores(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[int, np.ndarray]] = None, metric_label: str = "Score") -> None:
+    score_arr = np.array([scores[i] for i in G.nodes()])
     if pos is None:
         pos = nx.spring_layout(G, seed=0)
     fig, ax = plt.subplots(figsize=(6.8, 6.8), constrained_layout=True)
-    node_colors = plt.cm.viridis(belief_arr)
+    node_colors = plt.cm.viridis(score_arr)
     # light, thin edges
     nx.draw_networkx_edges(G, pos=pos, width=0.4, alpha=0.25, edge_color="#9AA4B2", ax=ax)
     nx.draw_networkx_nodes(G, pos=pos, node_size=70, node_color=node_colors, linewidths=0.0, ax=ax)
     sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=0, vmax=1))
-    sm.set_array(belief_arr)
+    sm.set_array(score_arr)
     cbar = fig.colorbar(sm, ax=ax)
     cbar.set_label(f"{metric_label} strength")
     ax.set_title(f"Final {metric_label}")
     ax.set_axis_off()
     plt.show()
 
-def plot_final_beliefs(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[int, np.ndarray]] = None, metric_label: str = "Belief") -> None:
-    """Backward-compatible alias for final scores heat map."""
-    return plot_final_scores(G, scores, pos=pos, metric_label=metric_label)
+def _scores_map(h: Dict, metric_id: Optional[str] = None) -> Dict[int, float]:
+    """Return per-node scores map from history entry, optionally selecting a metric."""
+    if metric_id and "scores_multi" in h:
+        multi = h.get("scores_multi") or {}
+        data = multi.get(metric_id)
+        if isinstance(data, dict):
+            return data
+    return h.get("scores", {})
 
-def _scores_map(h: Dict) -> Dict[int, float]:
-    """Return per-node scores map from history entry, preferring 'scores' then 'beliefs'."""
-    return h.get("scores", h.get("beliefs", {}))
 
-
-def plot_belief_trajectories(history: List[Dict], node_ids: List[int], ylim: Optional[List[float]] = None, metric_label: str = "Belief") -> None:
-    """Plot per-round belief values for selected node IDs using the history list."""
+def plot_score_trajectories(history: List[Dict], node_ids: List[int], ylim: Optional[List[float]] = None, metric_label: str = "Score", metric_id: Optional[str] = None) -> None:
+    """Plot per-round score values for selected node IDs using the history list."""
     rounds = list(range(len(history)))
     plt.figure(figsize=(7.5, 3.6))
     for node_id in node_ids:
-        ys = [float(_scores_map(h).get(node_id, np.nan)) for h in history]
+        ys = [float(_scores_map(h, metric_id).get(node_id, np.nan)) for h in history]
         plt.plot(rounds, ys, marker="o", label=f"node {node_id}")
     plt.xlabel("Round")
     plt.ylabel(f"{metric_label} (0-1)")
@@ -111,82 +112,124 @@ def plot_belief_trajectories(history: List[Dict], node_ids: List[int], ylim: Opt
     plt.legend()
     plt.show()
 
-def plot_score_trajectories(history: List[Dict], node_ids: List[int], ylim: Optional[List[float]] = None, metric_label: str = "Belief") -> None:
-    """Preferred name for node score trajectories."""
-    return plot_belief_trajectories(history, node_ids, ylim=ylim, metric_label=metric_label)
 
-def belief_trajectories_table(history: List[Dict], node_ids: Optional[List[int]] = None):
-    """Return a pandas DataFrame of belief trajectories. Columns: round and one column per node."""
+def score_trajectories_table(history: List[Dict], node_ids: Optional[List[int]] = None, metric_id: Optional[str] = None):
+    """Return a pandas DataFrame of score trajectories. Columns: round and one column per node."""
     import pandas as pd  # local import to avoid hard dependency at module import time
     num_rounds = len(history)
     rounds = list(range(num_rounds))
     if node_ids is None:
-        # infer all nodes from round 0 beliefs
-        node_ids = sorted(list(_scores_map(history[0]).keys()))
+        # infer all nodes from round 0 scores
+        node_ids = sorted(list(_scores_map(history[0], metric_id).keys()))
     data: Dict[str, List[float]] = {"round": rounds}
     for nid in node_ids:
-        data[str(nid)] = [float(_scores_map(history[r]).get(nid, np.nan)) for r in rounds]
+        data[str(nid)] = [float(_scores_map(history[r], metric_id).get(nid, np.nan)) for r in rounds]
     return pd.DataFrame(data)
 
 
-def animate_network(history: List[Dict], G: nx.Graph, interval_ms: int = 600, figsize=(6, 6), metric_label: str = "Belief"):
-    """Return a matplotlib.animation.FuncAnimation showing node belief changes over rounds.
 
-    Node color encodes belief [0,1] using viridis; edges drawn lightly. Pass the
-    final `G` and the full `history` list (round 0..T).
-    """
+
+def animate_network(
+    history: List[Dict],
+    G: nx.Graph,
+    interval_ms: int = 600,
+    figsize=(6, 6),
+    metric_label: str = "Score",
+    metric_id: Optional[str] = None,
+    personas: Optional[List] = None,
+    color_by: Optional[str] = None,
+):
+    """Return a matplotlib.animation.FuncAnimation showing node score changes over rounds."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     pos = nx.spring_layout(G, seed=0)
-    edges = nx.draw_networkx_edges(G, pos=pos, alpha=0.18, width=0.5, edge_color="#9AA4B2", ax=ax)
-    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=0, vmax=1))
-    cbar = fig.colorbar(sm, ax=ax)
-    cbar.set_label(metric_label)
+    nx.draw_networkx_edges(G, pos=pos, alpha=0.18, width=0.5, edge_color="#9AA4B2", ax=ax)
 
-    def frame_beliefs(t: int):
-        m = _scores_map(history[t])
+    color_mode = "score"
+    categorical_colors = None
+    cmap = plt.get_cmap("viridis")
+    
+    if color_by == "segment" and personas:
+        color_mode = "segment"
+        segment_names = [p.extra.get("_segment_name", "Unknown") for p in personas]
+        unique_names = sorted(list(set(segment_names)))
+        name_to_id = {name: i for i, name in enumerate(unique_names)}
+        node_color_indices = [name_to_id[name] for name in segment_names]
+        
+        cmap_categorical = plt.get_cmap('tab10', len(unique_names))
+        categorical_colors = [cmap_categorical(i) for i in node_color_indices]
+        
+        import matplotlib.patches as mpatches
+        legend_patches = [mpatches.Patch(color=cmap_categorical(i), label=name) for i, name in enumerate(unique_names)]
+        ax.legend(handles=legend_patches, title="Segment", bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    else: # Default to score-based coloring
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
+        cbar = fig.colorbar(sm, ax=ax)
+        cbar.set_label(metric_label)
+
+    def frame_scores(t: int):
+        m = _scores_map(history[t], metric_id)
         return [float(m.get(i, 0.0)) for i in G.nodes()]
 
     node_scatter = None
 
     def init():
         nonlocal node_scatter
-        beliefs0 = frame_beliefs(0)
-        colors = plt.cm.viridis(np.array(beliefs0))
+        scores0 = frame_scores(0)
+        colors = cmap(np.array(scores0)) if color_mode == "score" else categorical_colors
+        
         xs = [pos[i][0] for i in G.nodes()]
         ys = [pos[i][1] for i in G.nodes()]
         node_scatter = ax.scatter(xs, ys, c=colors, s=65)
         ax.set_axis_off()
         ax.set_title(f"{metric_label} evolution (t=0)")
-        return node_scatter,
+        return (node_scatter, ax.title)
 
     def update(frame):
         nonlocal node_scatter
-        beliefs = frame_beliefs(frame)
-        node_scatter.set_color(plt.cm.viridis(np.array(beliefs)))
+        if color_mode == "score":
+            scores = frame_scores(frame)
+            node_scatter.set_color(cmap(np.array(scores)))
+        # For categorical colors, the color is static, so no update needed
+        
         ax.set_title(f"{metric_label} evolution (t={frame})")
-        return node_scatter,
+        return (node_scatter, ax.title)
 
     ani = animation.FuncAnimation(fig, update, init_func=init, frames=len(history), interval=interval_ms, blit=True)
     return ani
 
 
-def show_animation(history: List[Dict], G: nx.Graph, interval_ms: int = 600, figsize=(6, 6), metric_label: str = "Belief"):
-    """Display the animation; uses JS HTML in notebooks, falls back to plt.show()."""
-    ani = animate_network(history, G, interval_ms=interval_ms, figsize=figsize, metric_label=metric_label)
+def show_animation(
+    history: List[Dict],
+    G: nx.Graph,
+    interval_ms: int = 600,
+    figsize=(6, 6),
+    metric_label: str = "Score",
+    metric_id: Optional[str] = None,
+    personas: Optional[List] = None,
+    color_by: Optional[str] = None,
+):
+    """
+    Display the animation as a reliable HTML5 video in notebooks.
+    This method prioritizes reliability over interactivity.
+    """
+    ani = animate_network(
+        history, G, interval_ms, figsize, metric_label, metric_id, personas, color_by
+    )
+
     try:
-        from IPython.display import HTML, display  # type: ignore
-        html = ani.to_jshtml()
-        import matplotlib.pyplot as plt
-        try:
-            plt.close(ani._fig)  # avoid duplicate static figure display
-        except Exception:
-            pass
+        from IPython.display import HTML, display
+        # Use to_html5_video() for maximum compatibility.
+        html = ani.to_html5_video()
+        plt.close(ani._fig)  # Avoid showing a static plot underneath
         display(HTML(html))
-    except Exception:
-        import matplotlib.pyplot as plt
+    except Exception as e:
+        print(f"Animation display failed: {e}")
+        # Fallback for non-notebook or problematic environments
         plt.show()
+
     return ani
 
 
@@ -229,12 +272,13 @@ def plot_group_over_time(
     groups: Optional[List[str]] = None,
     figsize=(7, 3),
     segments: Optional[List[Dict]] = None,
-    metric_label: str = "Belief",
+    metric_label: str = "Score",
+    metric_id: Optional[str] = None,
     by: str = "traits",  # 'traits' | 'segment'
 ) -> None:
     """Plot mean score over time grouped either by segments' traits (default) or by segment index.
 
-    - history: list of round dictionaries with 'beliefs'
+    - history: list of round dictionaries with 'scores'
     - personas: list of Persona objects (must have attribute 'attr' or key in extra)
     - by: 'traits' to group by a trait key; 'segment' to group by segment index (0..S-1)
     - attr (traits mode): attribute name; must be one of the keys defined under segments[*].traits
@@ -343,7 +387,7 @@ def plot_group_over_time(
             continue
         ys = []
         for h in history:
-            smap = _scores_map(h)
+            smap = _scores_map(h, metric_id)
             vals = [float(smap.get(i, np.nan)) for i in idxs]
             ys.append(float(np.nanmean(vals)) if len(vals) else np.nan)
         plt.plot(rounds, ys, marker="o", label=str(g))
@@ -357,26 +401,22 @@ def plot_group_over_time(
     plt.show()
 
 
-# Backward-compatible alias (deprecated)
-def plot_group_beliefs_over_time(history: List[Dict], personas: List, attr: str = "political", groups: Optional[List[str]] = None, figsize=(7, 3), segments: Optional[List[Dict]] = None, metric_label: str = "Belief") -> None:
-    return plot_group_over_time(history, personas, attr=attr, groups=groups, figsize=figsize, segments=segments, metric_label=metric_label, by="traits")
-
-
 def plot_centrality_vs_score_exposure(
     G: nx.Graph,
     history: List[Dict],
     metric: str = "degree",
     jitter: float = 0.02,
     figsize=(8, 3),
-    metric_label: str = "Belief",
+    metric_label: str = "Score",
     show_exposure: bool = False,
+    metric_id: Optional[str] = None,
 ) -> None:
-    """Scatter plots: centrality vs final belief, and centrality vs exposure (0/1).
+    """Scatter plots: centrality vs final score, and centrality vs exposure (0/1).
 
     metric: 'degree' | 'betweenness' | 'eigenvector'
     """
     final = history[-1]
-    beliefs = _scores_map(final)
+    scores_map = _scores_map(final, metric_id)
     coverage = set(final.get("coverage", set())) if show_exposure else set()
 
     # Centrality
@@ -393,11 +433,11 @@ def plot_centrality_vs_score_exposure(
         raise ValueError("Unknown metric. Use 'degree', 'betweenness', or 'eigenvector'.")
 
     xs = []
-    ys_belief = []
+    ys_score = []
     ys_exp = []
     for i in G.nodes():
         xs.append(float(cent.get(i, 0.0)))
-        ys_belief.append(float(beliefs.get(i, 0.0)))
+        ys_score.append(float(scores_map.get(i, 0.0)))
         ys_exp.append(1.0 if i in coverage else 0.0)
 
     if show_exposure:
@@ -409,7 +449,7 @@ def plot_centrality_vs_score_exposure(
         ax_right = None
     # Left: Centrality vs score (polished)
     s_color = "#2E6FBE"
-    ax_left.scatter(xs, ys_belief, s=46, alpha=0.85, color=s_color, edgecolors="white", linewidths=0.6)
+    ax_left.scatter(xs, ys_score, s=46, alpha=0.85, color=s_color, edgecolors="white", linewidths=0.6)
     ax_left.set_xlabel(f"{metric} centrality")
     ax_left.set_ylabel(f"Final {metric_label}")
     ax_left.set_title(f"Centrality vs {metric_label}")
@@ -417,7 +457,7 @@ def plot_centrality_vs_score_exposure(
     # Trend line with simple bootstrap CI for aesthetics
     try:
         x_arr = np.array(xs, dtype=float)
-        y_arr = np.array(ys_belief, dtype=float)
+        y_arr = np.array(ys_score, dtype=float)
         msk = np.isfinite(x_arr) & np.isfinite(y_arr)
         x_arr = x_arr[msk]
         y_arr = y_arr[msk]
@@ -465,33 +505,27 @@ def plot_centrality_vs_score_exposure(
 
     plt.tight_layout()
     plt.show()
-
-def plot_centrality_vs_belief_exposure(G: nx.Graph, history: List[Dict], metric: str = "degree", jitter: float = 0.02, figsize=(8, 3), metric_label: str = "Belief", show_exposure: bool = False) -> None:
-    """Backward-compatible alias; use plot_centrality_vs_score_exposure instead."""
-    return plot_centrality_vs_score_exposure(G, history, metric=metric, jitter=jitter, figsize=figsize, metric_label=metric_label, show_exposure=show_exposure)
-
-
 def plot_intervention_effect(
     history: List[Dict],
-    intervention_round: Optional[int] = None,
-    figsize=(6, 3),
+    intervention_rounds: Optional[List[int]] = None,
     attr: Optional[str] = None,
     groups: Optional[List[str]] = None,
     segments: Optional[List[Dict]] = None,
-    metric_label: str = "Belief",
+    metric_label: str = "Score",
+    metric_id: Optional[str] = None,
 ) -> None:
-    """Plot mean belief over time, with optional splitting by a segments trait.
+    """Plot mean score over time, with optional splitting by a segments trait.
 
-    - If attr is None (default), plots overall mean belief over time.
+    - If attr is None (default), plots overall mean score over time.
     - If attr is provided, it must be a key within segments[*].traits; we will plot
-      mean belief per group (restricted to 'groups' if provided).
+      mean score per group (restricted to 'groups' if provided).
     """
     rounds = list(range(len(history)))
 
-    def mean_beliefs_for_indices(indices: List[int]) -> List[float]:
+    def mean_scores_for_indices(indices: List[int]) -> List[float]:
         ys = []
         for h in history:
-            smap = _scores_map(h)
+            smap = _scores_map(h, metric_id)
             vals = [float(smap.get(i, np.nan)) for i in indices]
             ys.append(float(np.nanmean(vals)) if len(vals) else np.nan)
         return ys
@@ -500,10 +534,10 @@ def plot_intervention_effect(
     plt.figure(figsize=(7.5, 3.6))
 
     if attr is None:
-        # Overall mean belief
+        # Overall mean score
         ys = []
         for h in history:
-            smap = _scores_map(h)
+            smap = _scores_map(h, metric_id)
             vals = [float(v) for v in smap.values()]
             ys.append(float(np.mean(vals)) if len(vals) else np.nan)
         plt.plot(rounds, ys, marker="o", label=f"Mean {metric_label}", color="#2E6FBE")
@@ -538,8 +572,8 @@ def plot_intervention_effect(
         except Exception:
             preferred_order = None
 
-        # Infer group membership from personas implicitly via indices present in beliefs
-        # We assume that node indices are 0..n-1 and group can be read off round 0 beliefs dictionary keys.
+        # Infer group membership from personas implicitly via indices present in scores
+        # We assume that node indices are 0..n-1 and group can be read off round 0 score dictionary keys.
         # Since we don't have Persona objects here, we expect the caller to pass the subset via 'groups' if they want specific groups.
         # However, to honor the request, we'll approximate group membership based on segments proportions by mapping round 0 node count to segment order.
         # Better approach: caller should use API.Network.plot which has access to personas and forwards segments; we can still compute from personas there.
@@ -548,10 +582,10 @@ def plot_intervention_effect(
             # No explicit groups provided; fallback to overall mean with attr noted
             ys = []
             for h in history:
-                beliefs = h.get("beliefs", {})
-                vals = [float(v) for v in beliefs.values()]
+                smap = _scores_map(h, metric_id)
+                vals = [float(v) for v in smap.values()]
                 ys.append(float(np.mean(vals)) if len(vals) else np.nan)
-            plt.plot(rounds, ys, marker="o", label=f"Mean belief (all)", color="#2E6FBE")
+            plt.plot(rounds, ys, marker="o", label=f"Mean {metric_label} (all)", color="#2E6FBE")
             plt.fill_between(rounds, ys, step="pre", alpha=0.10, color="#2E6FBE")
         else:
             # We need personas to form groups accurately; detect if history carries indices only.
@@ -559,8 +593,8 @@ def plot_intervention_effect(
             # we cannot infer true membership. Therefore, we document that when attr/groups are used,
             # this function must be called via API which passes 'personas' elsewhere. To keep it functional,
             # we will attempt to split nodes into groups evenly by label order as a last resort.
-            beliefs0 = _scores_map(history[0])
-            node_ids = sorted(list(beliefs0.keys()))
+            scores0 = _scores_map(history[0], metric_id)
+            node_ids = sorted(list(scores0.keys()))
             n = len(node_ids)
             # even split across requested groups
             num_groups = len(groups)
@@ -570,13 +604,24 @@ def plot_intervention_effect(
 
             palette = ["#2E6FBE", "#D2453D", "#2BAF6A", "#8E44AD", "#F39C12", "#16A085"]
             for k, g in enumerate(groups):
-                ys = mean_beliefs_for_indices(group_to_indices[g])
+                ys = mean_scores_for_indices(group_to_indices[g])
                 color = palette[k % len(palette)]
                 plt.plot(rounds, ys, marker="o", label=str(g), color=color)
 
-    if intervention_round is not None and 0 <= intervention_round < len(history):
-        plt.axvline(intervention_round, color="#D2453D", linestyle="--", linewidth=2.0, label=f"Intervention at t={intervention_round}")
-        plt.axvspan(intervention_round, rounds[-1], color="#D2453D", alpha=0.06)
+    if intervention_rounds:
+        for i, r_round in enumerate(intervention_rounds):
+            plt.axvline(
+                x=r_round,
+                color="#D62728",  # More visible red
+                linestyle="--",
+                linewidth=2,
+                label=f"Intervention (t={r_round})" if i == 0 else None,
+            )
+
+    handles, labels = plt.gca().get_legend_handles_labels()
+    if handles:
+        plt.gca().legend(handles, labels, loc="upper left", frameon=True)
+
     plt.xlabel("Round")
     plt.ylabel(f"Mean {metric_label} (0-1)")
     plt.ylim(0, 1)
@@ -584,5 +629,14 @@ def plot_intervention_effect(
     plt.legend()
     plt.tight_layout()
     plt.show()
+
+
+
+
+
+
+
+
+
 
 

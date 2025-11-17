@@ -23,11 +23,11 @@ max_convo_turns: 10
 # Fraction of edges sampled per round to trigger conversations
 edge_sample_frac: 0.5
 
-# Seed nodes (initially exposed with high belief)
+# Seed nodes (initially exposed with a non-zero score)
 seed_nodes: [0, 1]
 
-# Belief value for seed nodes (0-1)
-seed_belief: 0.98
+# Score value for seed nodes (0-1)
+seed_score: 0.98
 
 # Information text (claim discussed when sampled)
 information_text: "Dogs are better than cats."
@@ -41,7 +41,7 @@ contagion_mode: llm
 # For complex contagion: minimum number of exposed neighbors to become exposed
 complex_threshold_k: 2
 
-# Early stopping when max belief change <= stability_tol
+# Early stopping when max score change <= stability_tol
 stop_when_stable: false
 stability_tol: 0.0001
 
@@ -88,11 +88,11 @@ api_key_file: api-key.txt
 # Printing controls
 # - print_conversations: print conversations
 # - print_all_conversations: include casual (non-information) conversations
-# - print_belief_updates: print belief changes when information discussed
+# - print_score_updates: print score changes when information discussed
 # - print_round_summaries: print round summaries
 print_conversations: true
 print_all_conversations: true
-print_belief_updates: true
+print_score_updates: true
 print_round_summaries: true
 
 
