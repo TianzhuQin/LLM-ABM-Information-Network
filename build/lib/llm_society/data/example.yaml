@@ -1,0 +1,98 @@
+###############################################
+# LLM-Society Simulation Config (example, full)
+###############################################
+
+# Model to use for conversations and summaries
+model: gpt-4.1
+
+# Number of agents (nodes)
+n: 5
+
+# Mean degree target for Erdos-Renyi network (gnp). Tie weights are sampled Beta(2,2)
+degree: 2
+
+# Number of rounds to simulate
+rounds: 100
+
+# Conversation depth intensity (0-1): 0=very shallow, 1=very deep
+depth: 0.6
+
+# Max turns per pair conversation (hard cap)
+max_convo_turns: 10
+
+# Fraction of edges sampled per round to trigger conversations
+edge_sample_frac: 0.5
+
+# Seed nodes (initially exposed with a non-zero score)
+seed_nodes: [0, 1]
+
+# Score value for seed nodes (0-1)
+seed_score: 0.98
+
+# Information text (claim discussed when sampled)
+information_text: "Dogs are better than cats."
+
+# Probability a sampled edge talks about the information this round
+talk_information_prob: 0.75
+
+# Contagion mode: 'llm' | 'simple' | 'complex'
+contagion_mode: llm
+
+# For complex contagion: minimum number of exposed neighbors to become exposed
+complex_threshold_k: 2
+
+# Early stopping when max score change <= stability_tol
+stop_when_stable: false
+stability_tol: 0.0001
+
+# Random seed for reproducibility
+rng_seed: 0
+
+# OpenAI API key file path (overridden by OPENAI_API_KEY if set)
+api_key_file: api-key.txt
+
+# Persona segments: list of segments with a proportion and trait specifications
+# - proportion: population share (auto-normalized)
+# - traits: keys among {gender, race, age, religion, political} plus any extra keys
+#   Value types:
+#     * fixed string: e.g., gender: Woman
+#     * weighted choices: {choices: {Woman: 0.6, Man: 0.4}}
+#     * normal age: {dist: normal, mean: 40, std: 12, min: 18, max: 80}
+#     * uniform age: {uniform: [min, max]}
+# persona_segments:
+#   - proportion: 0.4
+#     traits:
+#       gender: {choices: {Woman: 0.55, Man: 0.43, Nonbinary: 0.02}}
+#       race: {choices: {White: 0.5, Hispanic: 0.25, Black: 0.15, Asian: 0.08, Other: 0.02}}
+#       age: {dist: normal, mean: 42, std: 12, min: 18, max: 80}
+#       religion: {choices: {Protestant: 0.4, Catholic: 0.3, Unreligious: 0.3}}
+#       political: {choices: {Democrat: 0.6, Republican: 0.4}}
+#       region: Coastal
+#   - proportion: 0.3
+#     traits:
+#       gender: Man
+#       race: White
+#       age: {uniform: [30, 60]}
+#       religion: {choices: {Protestant: 0.6, Unreligious: 0.4}}
+#       political: {choices: {Republican: 0.65, Democrat: 0.35}}
+#       profession: {choices: {Construction: 0.5, Manufacturing: 0.5}}
+#   - proportion: 0.3
+#     traits:
+#       gender: {choices: {Woman: 0.5, Man: 0.5}}
+#       race: {choices: {Asian: 0.5, Hispanic: 0.5}}
+#       age: {dist: normal, mean: 28, std: 6, min: 18, max: 45}
+#       religion: Unreligious
+#       political: {choices: {Democrat: 0.7, Republican: 0.3}}
+#       education: {choices: {College: 0.7, HighSchool: 0.3}}
+
+# Printing controls
+# - print_conversations: print conversations
+# - print_all_conversations: include casual (non-information) conversations
+# - print_score_updates: print score changes when information discussed
+# - print_round_summaries: print round summaries
+print_conversations: true
+print_all_conversations: true
+print_score_updates: true
+print_round_summaries: true
+
+

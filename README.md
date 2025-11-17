@@ -3,8 +3,7 @@
 A Python package to simulate information diffusion with LLM-based agent conversations. It supports metric scoring in [0,1], segments-based personas, interventions, polished visualizations, and a simple CLI.
 
 ## Links
-- Quickstart (tiny LLM network, n=8): `docs/QUICKSTART_TINY.ipynb`
-- Advanced tutorial (segments, interventions, custom graphs, export): `docs/ADVANCED_TUTORIAL.ipynb`
+- Tutorial (LLM network, segments, interventions, custom graphs, export): `docs/TUTORIAL.ipynb`
 
 ## Features
 - Segment-based persona configuration (proportions, flexible trait specs; optional segment names)
@@ -104,7 +103,7 @@ llm-society --config my-config.yaml
 # or run fully via flags
 llm-society \
   --information "Claim text" --n 20 --degree 4 --rounds 10 \
-  --depth 0.6 --depth-max 6 --edge-frac 0.5 --conversation-scope all_pairs \
+  --depth 0.6 --depth-max 6 --edge-frac 0.5 --conversation-scope all \
   --seeds 0,1 --talk-prob 0.25 --mode llm --complex-k 2 --rng 0
 ```
 
@@ -114,7 +113,7 @@ llm-society \
 - Info/LLM: `information` (may be blank if an intervention is configured), `talk_information_prob`, `model`, `metric_name`, `metric_prompt`
 - Metrics: optional `metrics=[{id,label,prompt}, ...]` to request multi-dimensional scoring (first metric remains the default for legacy APIs)
 - Modes: `contagion_mode` in {llm, simple, complex}, `complex_threshold_k`
-- Conversation scope: `conversation_scope` in {edges, all_pairs}, `pair_weight_epsilon` (minimum sampling weight boost for zero-tie pairs)
+- Conversation scope: `conversation_scope` in {edges, all}, `pair_weight_epsilon` (minimum sampling weight boost for zero-tie pairs)
 - Memory: `memory_turns_per_agent` (0 disables memory)
 - Personas: `persona_segments` (with `proportion`, `traits`, optional `name`)
 
