@@ -174,7 +174,13 @@ def llm_multi_metric_updates(
         prompt_extra = (
             "\nConsidering their current tie strength and this conversation, what is their new tie strength (0.0 to 1.0)? "
             'Return this as "new_tie_strength" in the top-level JSON object.'
-        )
+    )
+
+    score_bias_hint = (
+        "Each agent trusts their own 'inside information' and prior stance. Base your scores on that "
+        "trusted lens and only reduce belief if the conversation itself includes compelling evidence "
+        "that this agent would personally accept."
+    )
 
     prompt = (
         f"Topic: {topic_text}\n"
@@ -182,6 +188,7 @@ def llm_multi_metric_updates(
         f"Prior scores:\n" + "\n".join(priors_lines) + "\n"
         f"Current tie strength (0-1): {float(np.clip(tie_weight, 0.0, 1.0)):.3f}\n"
         f"Recent conversation turns:\n{convo_text}\n\n"
+        f"{score_bias_hint}\n"
         f"Return JSON with one entry per metric id.{prompt_extra}"
     )
     out = call_chat(client, model, [{"role": "system", "content": sys}, {"role": "user", "content": prompt}], max_tokens_requested=128)
@@ -238,7 +245,9 @@ def llm_conversation_and_scores(
     depth = min(depth, max_turns_scaled)
     style_hint = (
         "Chat casually like two friends. Use 1-2 plain sentences. No markdown, no bullet points, "
-        "no headings, no numbered lists, no bold/italics. Keep it natural and conversational."
+        "no headings, no numbered lists, no bold/italics. Keep it natural and conversational. "
+        "Stay confident and consistent with your persona's beliefs; avoid hedging statements like "
+        "'I'm not sure' unless the other agent provides trusted evidence you personally accept."
     )
 
     def metric_guidance(priors: Dict[str, float]) -> str:
@@ -249,17 +258,22 @@ def llm_conversation_and_scores(
             parts.append(f"{label}={priors.get(mid, 0.0):.2f}")
         return "; ".join(parts)
 
+    topic_scope_hint = (
+        "Base your statements only on the provided topic description and what the other agent says. "
+        "Do not invent references to outside authorities, official statements, or media reports unless they are explicitly mentioned in the conversation."
+    )
+
     topic_text = str(topic_text or "").strip()
     discuss_topic = bool(talk_about_topic and topic_text)
     base_sys_i = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_i)}."
     base_sys_j = f"You are in a casual conversation. {style_hint} Demographics: {persona_to_text(p_j)}."
     if discuss_topic:
         guidance_i = (
-            f"Topic: {topic_text}. Your current metric scores are: {metric_guidance(prior_scores_i)}. "
+            f"Topic: {topic_text}. {topic_scope_hint} Your current metric scores are: {metric_guidance(prior_scores_i)}. "
             "If this topic is discussed, express views consistent with these scores."
         )
         guidance_j = (
-            f"Topic: {topic_text}. Your current metric scores are: {metric_guidance(prior_scores_j)}. "
+            f"Topic: {topic_text}. {topic_scope_hint} Your current metric scores are: {metric_guidance(prior_scores_j)}. "
             "If this topic is discussed, express views consistent with these scores."
         )
     else:
@@ -426,10 +440,12 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
     sum0 = llm_score_summary(model, summary_topic, arr0, metric_name) if contagion_mode == "llm" else ""
     if print_rounds and contagion_mode == "llm":
         print(f"Round 0 summary: {sum0}")
-    coverage0 = {i for i in range(n) if exposed[i] and any(scores_by_metric[mid][i] > 0 for mid in metric_ids)}
+    coverage0 = {i for i in range(n) if exposed[i]}
+    active0 = {i for i in range(n) if exposed[i] and any(scores_by_metric[mid][i] > 0 for mid in metric_ids)}
     history_entry = {
         "round": 0,
         "coverage": coverage0,
+        "active_believers": active0,
         "scores": scores.copy(),
         "scores_multi": {mid: scores_by_metric[mid].copy() for mid in metric_ids},
         "summary": sum0,
@@ -599,16 +615,19 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
                         "did_talk": bool(did_talk),
                         "turns": [str(x) for x in turns],
                     })
-            cov = {i for i in range(n) if exposed[i] and any(scores_by_metric[mid][i] > 0 for mid in metric_ids)}
+            cov = {i for i in range(n) if exposed[i]}
+            active_cov = {i for i in range(n) if exposed[i] and any(scores_by_metric[mid][i] > 0 for mid in metric_ids)}
             arr_t = [scores[i] for i in range(n)]
             sum_t = llm_score_summary(model, summary_topic, arr_t, metric_name)
             if print_rounds:
-                print(f"Round {t}: {len(cov)}/{n} exposed/scoring > 0")
+                print(f"Round {t}: {len(cov)}/{n} exposed")
+                print(f"Round {t} active believers (>0 score): {len(active_cov)}")
                 print(f"Round {t} summary: {sum_t}")
 
             history_entry = {
                 "round": t,
                 "coverage": cov,
+                "active_believers": active_cov,
                 "scores": scores.copy(),
                 "scores_multi": {mid: scores_by_metric[mid].copy() for mid in metric_ids},
                 "summary": sum_t,
@@ -654,12 +673,14 @@ def iterate_simulation(cfg: Dict) -> Iterator[Dict[str, Any]]:
                     for mid in metric_ids:
                         scores_by_metric[mid][i] = scores[i]
             exposed = next_exposed
-            cov = {i for i in range(n) if exposed[i] and scores[i] > 0}
+            cov = {i for i in range(n) if exposed[i]}
+            active_cov = {i for i in range(n) if exposed[i] and scores[i] > 0}
             arr_t = [scores[i] for i in range(n)]
             sum_t = ""
             history_entry = {
                 "round": t,
                 "coverage": cov,
+                "active_believers": active_cov,
                 "scores": scores.copy(),
                 "scores_multi": {mid: scores_by_metric[mid].copy() for mid in metric_ids},
                 "summary": sum_t,

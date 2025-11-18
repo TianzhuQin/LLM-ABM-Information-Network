@@ -247,6 +247,7 @@ class Network:
         type:
           - "animation": animated network (default; save supports mp4/gif/html)
           - "coverage": coverage over time
+          - "score": average metric score over time
           - "final": final node scores heat map on the graph
           - "group": mean score over time by persona attribute
               kwargs: attr="political", groups=[...]
@@ -266,7 +267,7 @@ class Network:
         metric_id, metric_label = self._resolve_metric_choice(metric_spec)
 
         requested_type = str(type).strip().lower()
-        allowed = {"animation", "coverage", "final", "group", "centrality", "intervention"}
+        allowed = {"animation", "coverage", "final", "group", "centrality", "intervention", "score"}
         if requested_type not in allowed:
             # Deprecated: handle `plot("filename.mp4")` as a save command for animation
             if save is None and "." in requested_type:
@@ -295,6 +296,9 @@ class Network:
         if requested_type == "final":
             scores_map = self._scores_for_metric(metric_id)
             viz.plot_final_scores(self._G, scores_map, metric_label=str(metric_label))
+            return
+        if requested_type == "score":
+            viz.plot_mean_score_over_time(self._history, metric_label=str(metric_label), metric_id=metric_id)
             return
 
         if requested_type == "group":
