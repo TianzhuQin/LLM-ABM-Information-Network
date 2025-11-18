@@ -49,11 +49,19 @@ def _polish_axes(ax):
 def plot_coverage_over_time(history: List[Dict]) -> None:
     coverage_sizes = [len(h.get("coverage", [])) for h in history]
     rounds = range(len(history))
+    total_nodes = 0
+    if history:
+        sample_scores = history[0].get("scores", {})
+        if isinstance(sample_scores, dict):
+            total_nodes = len(sample_scores)
     fig, ax = plt.subplots(figsize=(7.5, 3.6), constrained_layout=True)
     ax.plot(rounds, coverage_sizes, marker="o", color="#2E6FBE")
     ax.fill_between(list(rounds), coverage_sizes, step="pre", alpha=0.10, color="#2E6FBE")
     ax.set_xlabel("Round")
     ax.set_ylabel("# nodes exposed & believing > 0")
+    if total_nodes > 0:
+        ax.set_ylim(0, total_nodes)
+        ax.set_yticks(range(0, total_nodes + 1))
     ax.set_title("Coverage Over Time")
     _polish_axes(ax)
     # annotate final value
@@ -83,6 +91,25 @@ def plot_final_scores(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[
     cbar.set_label(f"{metric_label} strength")
     ax.set_title(f"Final {metric_label}")
     ax.set_axis_off()
+    plt.show()
+
+
+def plot_mean_score_over_time(history: List[Dict], metric_label: str = "Score", metric_id: Optional[str] = None) -> None:
+    rounds = range(len(history))
+    means: List[float] = []
+    for h in history:
+        smap = _scores_map(h, metric_id)
+        if smap:
+            means.append(float(np.mean(list(smap.values()))))
+        else:
+            means.append(0.0)
+    fig, ax = plt.subplots(figsize=(7.5, 3.6), constrained_layout=True)
+    ax.plot(list(rounds), means, marker="o", color="#F97316")
+    ax.set_xlabel("Round")
+    ax.set_ylabel(f"Mean {metric_label} (0-1)")
+    ax.set_title(f"Average {metric_label} Over Time")
+    ax.set_ylim(0, 1)
+    _polish_axes(ax)
     plt.show()
 
 def _scores_map(h: Dict, metric_id: Optional[str] = None) -> Dict[int, float]:
@@ -166,8 +193,8 @@ def animate_network(
 
     else: # Default to score-based coloring
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
-        cbar = fig.colorbar(sm, ax=ax)
-        cbar.set_label(metric_label)
+    cbar = fig.colorbar(sm, ax=ax)
+    cbar.set_label(metric_label)
 
     def frame_scores(t: int):
         m = _scores_map(history[t], metric_id)
