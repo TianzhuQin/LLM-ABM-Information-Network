@@ -349,6 +349,9 @@ class Network:
 
             attr = kwargs.get("attr", None)
             groups = kwargs.get("groups", None)
+            x_limit = kwargs.get("x_limit", None)
+            y_limit = kwargs.get("y_limit", None)
+            inset = kwargs.get("inset", False)
             viz.plot_intervention_effect(
                 self._history,
                 intervention_rounds=intervention_rounds,
@@ -357,6 +360,9 @@ class Network:
                 segments=self.segments,
                 metric_label=str(metric_label),
                 metric_id=metric_id,
+                x_limit=x_limit,
+                y_limit=y_limit,
+                inset=inset,
             )
             return
 

@@ -1,4 +1,6 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.patches import ConnectionPatch, Rectangle
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -46,21 +48,26 @@ def _polish_axes(ax):
     return ax
 
 
-def plot_coverage_over_time(history: List[Dict]) -> None:
+def plot_coverage_over_time(history: List[Dict], shade: bool = True) -> None:
     coverage_sizes = [len(h.get("coverage", [])) for h in history]
-    rounds = range(len(history))
+    rounds = list(range(len(history)))
     total_nodes = 0
     if history:
         sample_scores = history[0].get("scores", {})
         if isinstance(sample_scores, dict):
             total_nodes = len(sample_scores)
     fig, ax = plt.subplots(figsize=(7.5, 3.6), constrained_layout=True)
-    ax.plot(rounds, coverage_sizes, marker="o", color="#2E6FBE")
-    ax.fill_between(list(rounds), coverage_sizes, step="pre", alpha=0.10, color="#2E6FBE")
+    coverage_color = "#2E6FBE"
+    coverage_fill = "#BFDBFE"  # lighter blue
+    ax.plot(rounds, coverage_sizes, marker="o", color=coverage_color)
+    if shade:
+        ax.fill_between(rounds, coverage_sizes, step="pre", alpha=0.25, color=coverage_fill)
     ax.set_xlabel("Round")
-    ax.set_ylabel("# nodes exposed & believing > 0")
+    ax.set_xticks(rounds if rounds else [0])
+    ax.set_ylabel("# of nodes")
     if total_nodes > 0:
-        ax.set_ylim(0, total_nodes)
+        top_margin = max(1, total_nodes * 0.02)
+        ax.set_ylim(-top_margin, total_nodes + top_margin)
         ax.set_yticks(range(0, total_nodes + 1))
     ax.set_title("Coverage Over Time")
     _polish_axes(ax)
@@ -81,11 +88,12 @@ def plot_final_scores(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[
     if pos is None:
         pos = nx.spring_layout(G, seed=0)
     fig, ax = plt.subplots(figsize=(6.8, 6.8), constrained_layout=True)
-    node_colors = plt.cm.viridis(score_arr)
+    cmap = plt.cm.viridis_r
+    node_colors = cmap(score_arr)
     # light, thin edges
     nx.draw_networkx_edges(G, pos=pos, width=0.4, alpha=0.25, edge_color="#9AA4B2", ax=ax)
     nx.draw_networkx_nodes(G, pos=pos, node_size=70, node_color=node_colors, linewidths=0.0, ax=ax)
-    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(vmin=0, vmax=1))
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
     sm.set_array(score_arr)
     cbar = fig.colorbar(sm, ax=ax)
     cbar.set_label(f"{metric_label} strength")
@@ -95,7 +103,7 @@ def plot_final_scores(G: nx.Graph, scores: Dict[int, float], pos: Optional[Dict[
 
 
 def plot_mean_score_over_time(history: List[Dict], metric_label: str = "Score", metric_id: Optional[str] = None) -> None:
-    rounds = range(len(history))
+    rounds = list(range(len(history)))
     means: List[float] = []
     for h in history:
         smap = _scores_map(h, metric_id)
@@ -104,11 +112,12 @@ def plot_mean_score_over_time(history: List[Dict], metric_label: str = "Score", 
         else:
             means.append(0.0)
     fig, ax = plt.subplots(figsize=(7.5, 3.6), constrained_layout=True)
-    ax.plot(list(rounds), means, marker="o", color="#F97316")
+    ax.plot(rounds, means, marker="o", color="#F97316")
     ax.set_xlabel("Round")
+    ax.set_xticks(rounds if rounds else [0])
     ax.set_ylabel(f"Mean {metric_label} (0-1)")
     ax.set_title(f"Average {metric_label} Over Time")
-    ax.set_ylim(0, 1)
+    ax.set_ylim(-0.05, 1.05)
     _polish_axes(ax)
     plt.show()
 
@@ -540,6 +549,9 @@ def plot_intervention_effect(
     segments: Optional[List[Dict]] = None,
     metric_label: str = "Score",
     metric_id: Optional[str] = None,
+    x_limit: Optional[Tuple[int, int]] = None,
+    y_limit: Optional[Tuple[float, float]] = None,
+    inset: bool = False,
 ) -> None:
     """Plot mean score over time, with optional splitting by a segments trait.
 
@@ -649,12 +661,68 @@ def plot_intervention_effect(
     if handles:
         plt.gca().legend(handles, labels, loc="upper left", frameon=True)
 
+    xmin, xmax = None, None
+    if x_limit:
+        xmin = max(0, int(x_limit[0]))
+        xmax = int(x_limit[1])
     plt.xlabel("Round")
+    plt.xticks(rounds if rounds else [0])
     plt.ylabel(f"Mean {metric_label} (0-1)")
+    if y_limit:
+        ymin, ymax = y_limit
+    else:
+        ymin, ymax = (0.0, 1.0)
     plt.ylim(0, 1)
     plt.title(f"Intervention Effect on Mean {metric_label}")
     plt.legend()
-    plt.tight_layout()
+    fig = plt.gcf()
+    main_ax = plt.gca()
+    line_data = [
+        (line.get_xdata(), line.get_ydata(), line.get_color(), line.get_marker())
+        for line in main_ax.get_lines()
+    ]
+    if inset and xmin is not None and xmax is not None:
+        inset_width = 0.35
+        inset_height = 0.35
+        inset_left = 0.95
+        inset_bottom = 0.5
+        inset_ax = fig.add_axes([inset_left, inset_bottom, inset_width, inset_height])
+        for xdata, ydata, color, marker in line_data:
+            inset_ax.plot(xdata, ydata, color=color, marker=marker)
+        if intervention_rounds:
+            for r_round in intervention_rounds:
+                inset_ax.axvline(x=r_round, color="#D62728", linestyle="--", linewidth=1.2)
+        inset_ax.set_xlim(xmin, xmax)
+        inset_ax.set_ylim(ymin, ymax)
+        inset_ticks = list(range(int(np.floor(xmin)), int(np.ceil(xmax)) + 1))
+        inset_ax.set_xticks(inset_ticks)
+        inset_ax.set_title("Zoomed view", fontsize=9)
+        inset_ax.set_xlabel("")
+        inset_ax.set_ylabel("")
+        inset_ax.tick_params(axis='both', which='major', labelsize=8)
+        highlight = Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            linewidth=1.0,
+            edgecolor="#8FA8D8",
+            facecolor="none",
+            linestyle="--",
+        )
+        main_ax.add_patch(highlight)
+        connectors = [((xmin, ymin), (0, 0)), ((xmax, ymax), (1, 1))]
+        for (x_main, y_main), (x_rel, y_rel) in connectors:
+            con = ConnectionPatch(
+                xyA=(x_main, y_main),
+                coordsA=main_ax.transData,
+                xyB=(x_rel, y_rel),
+                coordsB=inset_ax.transAxes,
+                color="#8FA8D8",
+                linewidth=1.0,
+                linestyle="--",
+                alpha=0.8,
+            )
+            fig.add_artist(con)
     plt.show()
 
 

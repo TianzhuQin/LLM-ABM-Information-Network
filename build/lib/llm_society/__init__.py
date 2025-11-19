@@ -9,7 +9,7 @@ Modules:
 - viz: visualization helpers
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from .config import load_config  # noqa: F401
 from .persona import Persona, sample_personas, persona_to_text  # noqa: F401
